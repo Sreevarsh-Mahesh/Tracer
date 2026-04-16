@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import useSWR from "swr";
 import {
   Box,
@@ -51,7 +51,24 @@ export function JourneyPanel() {
   const [playing, setPlaying] = useState(true);
   const [playheadMs, setPlayheadMs] = useState(0);
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  const replayIframeRef = useRef<HTMLIFrameElement | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
+
+  // Lock iframe scrolling and inject overflow:hidden into its body
+  const lockIframeScroll = useCallback(() => {
+    const iframeDoc = replayIframeRef.current?.contentDocument;
+    if (!iframeDoc) return;
+    try {
+      const style = iframeDoc.createElement("style");
+      style.id = "__tracer_scroll_lock__";
+      style.textContent = "html,body{overflow:hidden!important;pointer-events:none!important;}";
+      if (!iframeDoc.getElementById("__tracer_scroll_lock__")) {
+        iframeDoc.head?.appendChild(style);
+      }
+      iframeDoc.documentElement.scrollTop = 0;
+      iframeDoc.body.scrollTop = 0;
+    } catch (_) { /* cross-origin guard */ }
+  }, []);
 
   // Auto-select first cluster when data arrives
   useEffect(() => {
@@ -72,6 +89,32 @@ export function JourneyPanel() {
     }, 120);
     return () => window.clearInterval(interval);
   }, [playing, replayDurationMs, selectedCluster]);
+
+  // Programmatic scroll: drive iframe scroll based on cursor Y position
+  useEffect(() => {
+    if (!selectedCluster) return;
+    const iframeDoc = replayIframeRef.current?.contentDocument;
+    if (!iframeDoc) return;
+    try {
+      const IFRAME_HEIGHT = 680;
+      const SCROLL_THRESHOLD = 0.65; // start scrolling when cursor is below 65% of visible area
+
+      // Get the lowest Y across all active cursors
+      let maxY = 0;
+      selectedCluster.streams.forEach((stream) => {
+        const point = stream.points.findLast((p) => p.ts <= playheadMs);
+        if (point && point.y > maxY) maxY = point.y;
+      });
+
+      if (maxY > SCROLL_THRESHOLD) {
+        const pageHeight = iframeDoc.documentElement.scrollHeight;
+        const target = Math.round(maxY * pageHeight - IFRAME_HEIGHT / 2);
+        iframeDoc.documentElement.scrollTop = Math.max(0, target);
+      } else if (maxY < 0.1) {
+        iframeDoc.documentElement.scrollTop = 0;
+      }
+    } catch (_) { /* cross-origin guard */ }
+  }, [playheadMs, selectedCluster]);
 
   if (isLoading) {
     return (
@@ -136,13 +179,32 @@ export function JourneyPanel() {
               )}
 
               <Box sx={{ position: "relative", overflow: "hidden", borderRadius: "8px", border: "1px solid rgba(226, 232, 240, 0.10)", backgroundColor: "#0B1220" }}>
-                <iframe title="Tracer journey replay surface" src={IFRAME_SRC} sandbox="allow-same-origin allow-scripts" style={{ width: "100%", height: 680, border: 0, display: "block" }} />
-                <Box ref={overlayRef} sx={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                <iframe
+                  ref={replayIframeRef}
+                  title="Tracer journey replay surface"
+                  src={IFRAME_SRC}
+                  sandbox="allow-same-origin allow-scripts"
+                  scrolling="no"
+                  style={{ width: "100%", height: 680, border: 0, display: "block", overflow: "hidden" }}
+                  onLoad={lockIframeScroll}
+                />
+                {/* Full transparent overlay — blocks all user interaction with the iframe */}
+                <Box
+                  sx={{
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 2,
+                    cursor: "default",
+                    // Allow wheel events to bubble to the dashboard page rather than scroll iframe
+                    touchAction: "none",
+                  }}
+                />
+                <Box ref={overlayRef} sx={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 3 }}>
                   {selectedCluster.streams.map((stream) => {
                     const point = getPointAt(playheadMs, stream.points);
                     if (!point) return null;
                     return (
-                      <Box key={stream.sessionId} sx={{ position: "absolute", left: `calc(${point.x * 100}% - 8px)`, top: `calc(${point.y * 100}% - 8px)`, transform: "translate(-50%, -50%)", transition: "left 120ms linear, top 120ms linear" }}>
+                      <Box key={stream.sessionId} sx={{ position: "absolute", left: `calc(${point.x * 100}% - 8px)`, top: `calc(${point.y * 100}% - 8px)`, transform: "translate(-50%, -50%)", transition: "left 120ms linear, top 120ms linear", zIndex: 4 }}>
                         <FriendlyCursor color={stream.color} />
                       </Box>
                     );

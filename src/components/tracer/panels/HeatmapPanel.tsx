@@ -147,10 +147,20 @@ export function HeatmapPanel() {
                 title="Tracer heatmap target"
                 src={IFRAME_SRC}
                 sandbox="allow-same-origin allow-scripts"
-                style={{ width: "100%", height: 760, border: 0, display: "block" }}
+                scrolling="no"
+                style={{ width: "100%", height: 760, border: 0, display: "block", overflow: "hidden" }}
                 onLoad={() => {
                   const frameDocument = iframeRef.current?.contentDocument;
                   if (!frameDocument) return;
+                  // Lock iframe scrolling — scroll is not meaningful in a static heatmap view
+                  try {
+                    if (!frameDocument.getElementById("__tracer_scroll_lock__")) {
+                      const style = frameDocument.createElement("style");
+                      style.id = "__tracer_scroll_lock__";
+                      style.textContent = "html,body{overflow:hidden!important;}";
+                      frameDocument.head?.appendChild(style);
+                    }
+                  } catch (_) { /* cross-origin guard */ }
                   const frameElements = frameDocument.querySelectorAll<HTMLElement>("[data-tracer-id]");
                   const nextBoxes = Array.from(frameElements)
                     .map((element) => {

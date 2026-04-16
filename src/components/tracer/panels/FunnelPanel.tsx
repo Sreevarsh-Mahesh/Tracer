@@ -79,6 +79,20 @@ export function FunnelPanel() {
     return () => { listenerCleanupRef.current?.(); };
   }, []);
 
+  // Inject scroll lock into iframe (doesn't disable pointer-events so clicks still work)
+  function lockFrameScroll() {
+    const iframeDoc = iframeRef.current?.contentDocument;
+    if (!iframeDoc) return;
+    try {
+      if (!iframeDoc.getElementById("__tracer_scroll_lock__")) {
+        const style = iframeDoc.createElement("style");
+        style.id = "__tracer_scroll_lock__";
+        style.textContent = "html,body{overflow:hidden!important;}";
+        iframeDoc.head?.appendChild(style);
+      }
+    } catch (_) { /* cross-origin guard */ }
+  }
+
   function attachListener() {
     listenerCleanupRef.current?.();
     const frameDocument = iframeRef.current?.contentDocument;
@@ -136,14 +150,27 @@ export function FunnelPanel() {
                 <Typography variant="body2" color="text.secondary">{builderHint}</Typography>
               </Stack>
 
-              <Box sx={{ position: "relative", overflow: "hidden", borderRadius: "8px", border: "1px solid rgba(226, 232, 240, 0.10)", backgroundColor: "#0B1220" }}>
+              <Box
+                sx={{
+                  position: "relative", overflow: "hidden", borderRadius: "8px",
+                  border: "1px solid rgba(226, 232, 240, 0.10)", backgroundColor: "#0B1220",
+                  // Block wheel events from reaching the iframe — let them bubble to the page
+                  "& iframe": { display: "block" },
+                }}
+                onWheel={(e) => e.stopPropagation()}
+              >
                 <iframe
                   ref={iframeRef}
                   title="Tracer funnel builder surface"
                   src={IFRAME_SRC}
                   sandbox="allow-same-origin allow-scripts"
-                  style={{ width: "100%", height: 680, border: 0, display: "block" }}
-                  onLoad={() => { attachListener(); paintTrackedSteps(iframeRef.current?.contentDocument ?? null, steps); }}
+                  scrolling="no"
+                  style={{ width: "100%", height: 680, border: 0, display: "block", overflow: "hidden" }}
+                  onLoad={() => {
+                    lockFrameScroll();
+                    attachListener();
+                    paintTrackedSteps(iframeRef.current?.contentDocument ?? null, steps);
+                  }}
                 />
               </Box>
 
