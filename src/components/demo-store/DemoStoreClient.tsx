@@ -11,7 +11,6 @@ import {
   Stack,
   Typography
 } from "@mui/material";
-import tracer from "tracer";
 
 const trackedButtonSx = {
   borderRadius: "10px",
@@ -31,22 +30,43 @@ const trackedButtonSx = {
   }
 } as const;
 
+/**
+ * Dynamically import the SDK to avoid SSR issues.
+ * This uses the local tracer-sdk package via the tsconfig path alias in dev,
+ * and the published `tracer-sdk` npm package in production.
+ */
+async function initTracer(embedded: boolean) {
+  // Dynamic import to work in both dev (path alias) and prod (npm package)
+  const { default: tracer } = await import("tracer-sdk");
+
+  return tracer.init({
+    projectId: process.env.NEXT_PUBLIC_PROJECT_ID ?? "tracer-demo",
+    apiKey: process.env.NEXT_PUBLIC_TRACER_API_KEY ?? "tk_dev_local",
+    endpoint: typeof window !== "undefined"
+      ? `${window.location.origin}/api/ingest`
+      : "/api/ingest",
+    route: "/demo-store",
+    userLabel: embedded ? "Embedded dashboard tester" : "Public demo visitor",
+    userSegment: embedded ? "Dashboard iframe session" : "Standalone product session",
+  });
+}
+
 export function DemoStoreClient({ embedded }: { embedded: boolean }) {
   useEffect(() => {
-    return tracer.init({
-      projectId: "tracer-demo",
-      route: "/demo-store",
-      userLabel: embedded ? "Embedded dashboard tester" : "Public demo visitor",
-      userSegment: embedded ? "Dashboard iframe session" : "Standalone product session"
+    let cleanup: (() => void) | undefined;
+
+    initTracer(embedded).then((cleanupFn) => {
+      cleanup = cleanupFn;
     });
+
+    return () => { cleanup?.(); };
   }, [embedded]);
 
   return (
     <Box
       sx={{
         minHeight: "100vh",
-        background:
-          "linear-gradient(180deg, #F7FBFF 0%, #EEF6FF 100%)",
+        background: "linear-gradient(180deg, #F7FBFF 0%, #EEF6FF 100%)",
         color: "#0F172A",
         p: embedded ? 2 : 3
       }}
@@ -71,13 +91,13 @@ export function DemoStoreClient({ embedded }: { embedded: boolean }) {
               Tracer Demo Commerce App
             </Typography>
             <Typography sx={{ color: "#475569", fontSize: 14 }}>
-              Instrumented with `import tracer from "tracer"` so the dashboard can inspect real interactions.
+              Instrumented with `import tracer from "tracer-sdk"` — all interactions are sent to Firestore via the ingestion API.
             </Typography>
           </Box>
           {!embedded ? (
             <Stack direction="row" spacing={1}>
-              <Chip label="rrweb-ready" sx={{ backgroundColor: "#DBEAFE", color: "#1D4ED8" }} />
-              <Chip label="Funnel tracked" sx={{ backgroundColor: "#DCFCE7", color: "#15803D" }} />
+              <Chip label="SDK active" sx={{ backgroundColor: "#DCFCE7", color: "#15803D" }} />
+              <Chip label="Funnel tracked" sx={{ backgroundColor: "#DBEAFE", color: "#1D4ED8" }} />
             </Stack>
           ) : null}
         </Box>

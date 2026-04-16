@@ -12,7 +12,7 @@
     "moduleResolution": "bundler",
     "paths": {
       "@/*": ["./src/*"],
-      "tracer": ["./src/sdk/index.ts"]
+      "tracer-sdk": ["./tracer-sdk/src/index.ts"]
     },
     "resolveJsonModule": true,
     "isolatedModules": true,
@@ -21,5 +21,5 @@
     "plugins": [{ "name": "next" }]
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "tracer-sdk/node_modules", "tracer-sdk/dist"]
 }

@@ -1,0 +1,38 @@
+{
+  "name": "tracer-sdk",
+  "version": "1.0.0",
+  "description": "Lightweight product analytics SDK — captures clicks, hovers, mouse movements, and custom events. Ships data to your Tracer dashboard.",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "analytics",
+    "heatmap",
+    "session-replay",
+    "product-analytics",
+    "tracer",
+    "user-behavior"
+  ],
+  "author": "Sreevarsh Mahesh",
+  "license": "MIT",
+  "devDependencies": {
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3"
+  }
+}

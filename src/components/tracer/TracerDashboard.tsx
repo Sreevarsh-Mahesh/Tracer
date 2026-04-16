@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import useSWR from "swr";
 import {
   Avatar,
   Box,
@@ -9,51 +10,46 @@ import {
   Card,
   CardContent,
   Chip,
+  Skeleton,
   Stack,
   Tab,
   Tabs,
   Typography
 } from "@mui/material";
-import { Activity, Flame, Lock, Route, Store } from "lucide-react";
-import { ensureTracerSeedData, getDashboardOverview, subscribeToTracerData } from "@/lib/tracer-store";
+import { Activity, Flame, Lock, Route, Settings, Store } from "lucide-react";
 import { HeatmapPanel } from "./panels/HeatmapPanel";
 import { JourneyPanel } from "./panels/JourneyPanel";
 import { FunnelPanel } from "./panels/FunnelPanel";
+import { SettingsPanel } from "./panels/SettingsPanel";
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 const panelTabs = [
   { label: "UI Heatmap" },
   { label: "Journey Replay" },
-  { label: "Conversion Funnels" }
+  { label: "Conversion Funnels" },
+  { label: "Settings" }
 ];
 
 export function TracerDashboard() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState(0);
-  const [refreshToken, setRefreshToken] = useState(0);
-  const [clientReady, setClientReady] = useState(false);
 
-  useEffect(() => {
-    ensureTracerSeedData();
-    setClientReady(true);
+  const { data: overview, isLoading } = useSWR("/api/tracer/overview", fetcher, {
+    refreshInterval: 10000,
+    fallbackData: {
+      totalSessions: 0,
+      liveSessions: 0,
+      clusterCount: 0,
+      trackedElementCount: 6
+    }
+  });
 
-    return subscribeToTracerData(() => {
-      setRefreshToken((value) => value + 1);
-    });
-  }, []);
-
-  const overview = clientReady
-    ? getDashboardOverview()
-    : {
-        totalSessions: 0,
-        liveSessions: 0,
-        clusterCount: 0,
-        trackedElementCount: 6
-      };
   const summaryCards = [
     {
       title: "Tracked Sessions",
       value: overview.totalSessions.toString(),
-      hint: `${overview.liveSessions} live during this browser session`,
+      hint: `${overview.liveSessions} captured via SDK`,
       icon: Activity
     },
     {
@@ -92,7 +88,7 @@ export function TracerDashboard() {
             </Typography>
             <Typography color="text.secondary" sx={{ maxWidth: 860 }}>
               Structured analytics for developers: inspect element-level heatmaps, clustered replay
-              summaries, and custom conversion funnels on top of the same instrumented product surface.
+              summaries, and custom conversion funnels — powered by real SDK data from Firestore.
             </Typography>
           </Box>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
@@ -120,9 +116,13 @@ export function TracerDashboard() {
                     <Typography variant="overline" color="text.secondary">
                       {title}
                     </Typography>
-                    <Typography variant="h3" sx={{ mt: 0.5 }}>
-                      {value}
-                    </Typography>
+                    {isLoading ? (
+                      <Skeleton width={60} height={40} />
+                    ) : (
+                      <Typography variant="h3" sx={{ mt: 0.5 }}>
+                        {value}
+                      </Typography>
+                    )}
                     <Typography color="text.secondary">{hint}</Typography>
                   </Box>
                   <Avatar
@@ -158,9 +158,10 @@ export function TracerDashboard() {
           </CardContent>
         </Card>
 
-        {activeTab === 0 ? <HeatmapPanel refreshToken={refreshToken} /> : null}
-        {activeTab === 1 ? <JourneyPanel refreshToken={refreshToken} /> : null}
-        {activeTab === 2 ? <FunnelPanel refreshToken={refreshToken} /> : null}
+        {activeTab === 0 ? <HeatmapPanel /> : null}
+        {activeTab === 1 ? <JourneyPanel /> : null}
+        {activeTab === 2 ? <FunnelPanel /> : null}
+        {activeTab === 3 ? <SettingsPanel /> : null}
       </Stack>
     </Box>
   );

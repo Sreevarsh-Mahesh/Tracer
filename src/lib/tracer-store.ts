@@ -1,3 +1,17 @@
+/**
+ * Server-side analytics computation layer.
+ *
+ * These functions query Firestore for session data and compute
+ * the same metrics that the old localStorage-based tracer-store.ts did,
+ * but reading from the cloud database instead.
+ *
+ * Used by the /api/tracer/* dashboard API routes.
+ */
+
+import { getDb, SESSIONS_COLLECTION, type StoredSession, type StoredEvent } from "./firebase-admin";
+
+// ─── Types (re-exported for dashboard components) ────────────────────────────
+
 export type TracerEventType = "route" | "impression" | "hover" | "click" | "mousemove" | "custom";
 
 export type TracerRect = {
@@ -7,20 +21,7 @@ export type TracerRect = {
   height: number;
 };
 
-export type TracerEvent = {
-  id: string;
-  type: TracerEventType;
-  ts: number;
-  route: string;
-  elementId?: string;
-  elementLabel?: string;
-  rect?: TracerRect;
-  x?: number;
-  y?: number;
-  hoverMs?: number;
-  repeatIndex?: number;
-  name?: string;
-};
+export type TracerEvent = StoredEvent;
 
 export type TracerSession = {
   id: string;
@@ -30,15 +31,8 @@ export type TracerSession = {
   endedAt: number;
   userLabel: string;
   userSegment: string;
-  source: "seed" | "live";
+  source: "sdk" | "seed";
   events: TracerEvent[];
-};
-
-export type TracerStoreData = {
-  version: number;
-  projectId: string;
-  seededAt: number | null;
-  sessions: TracerSession[];
 };
 
 export type TrackedElementDefinition = {
@@ -95,12 +89,11 @@ export type FunnelStepMetric = {
   avgTimeFromPreviousMs: number | null;
 };
 
-export const TRACER_STORAGE_KEY = "tracer-demo-store-v2";
-export const TRACER_DATA_EVENT = "tracer:data-updated";
-export const TRACER_SESSION_KEY = "tracer-demo-live-session-id";
+// ─── Tracked element registry ────────────────────────────────────────────────
+// These are the well-known elements the demo store tracks.
+// In a production version, this would be dynamically discovered from ingested data.
+
 export const DEMO_APP_ROUTE = "/demo-store";
-const STORE_VERSION = 2;
-const VIEWPORT = { width: 1200, height: 860 };
 
 const TRACKED_ELEMENTS: Record<string, TrackedElementDefinition> = {
   home: {
@@ -108,462 +101,94 @@ const TRACKED_ELEMENTS: Record<string, TrackedElementDefinition> = {
     label: "Home",
     route: DEMO_APP_ROUTE,
     description: "Landing hero entry point",
-    rect: { x: 72, y: 116, width: 660, height: 232 }
+    rect: { x: 72, y: 116, width: 660, height: 232 },
   },
   product: {
     id: "product",
     label: "Product",
     route: DEMO_APP_ROUTE,
     description: "Feature comparison panel",
-    rect: { x: 72, y: 402, width: 372, height: 194 }
+    rect: { x: 72, y: 402, width: 372, height: 194 },
   },
   pricing: {
     id: "pricing",
     label: "Pricing",
     route: DEMO_APP_ROUTE,
     description: "Plan and budget card",
-    rect: { x: 472, y: 402, width: 284, height: 194 }
+    rect: { x: 472, y: 402, width: 284, height: 194 },
   },
   cart: {
     id: "cart",
     label: "Add to Cart",
     route: DEMO_APP_ROUTE,
     description: "Cart intent and bundling CTA",
-    rect: { x: 72, y: 628, width: 396, height: 94 }
+    rect: { x: 72, y: 628, width: 396, height: 94 },
   },
   checkout: {
     id: "checkout",
     label: "Checkout",
     route: DEMO_APP_ROUTE,
     description: "Secure checkout CTA",
-    rect: { x: 836, y: 190, width: 302, height: 190 }
+    rect: { x: 836, y: 190, width: 302, height: 190 },
   },
   purchase: {
     id: "purchase",
     label: "Purchase",
     route: DEMO_APP_ROUTE,
     description: "Completed conversion state",
-    rect: { x: 836, y: 470, width: 302, height: 154 }
-  }
+    rect: { x: 836, y: 470, width: 302, height: 154 },
+  },
 };
 
-function createId(prefix: string) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
-}
+// ─── Firestore data access ───────────────────────────────────────────────────
 
-function getBrowserWindow() {
-  return typeof window === "undefined" ? null : window;
-}
+export async function fetchAllSessions(projectId?: string): Promise<TracerSession[]> {
+  const db = getDb();
+  let query = db.collection(SESSIONS_COLLECTION).orderBy("startedAt", "desc").limit(200);
 
-function getDefaultStore(): TracerStoreData {
-  return {
-    version: STORE_VERSION,
-    projectId: "tracer-demo",
-    seededAt: null,
-    sessions: []
-  };
-}
-
-function writeTracerStore(store: TracerStoreData) {
-  const browserWindow = getBrowserWindow();
-
-  if (!browserWindow) {
-    return;
+  if (projectId) {
+    query = query.where("projectId", "==", projectId);
   }
 
-  browserWindow.localStorage.setItem(TRACER_STORAGE_KEY, JSON.stringify(store));
-  browserWindow.dispatchEvent(new CustomEvent(TRACER_DATA_EVENT));
+  const snapshot = await query.get();
 
-  if (browserWindow.parent && browserWindow.parent !== browserWindow) {
-    browserWindow.parent.postMessage({ type: TRACER_DATA_EVENT }, browserWindow.location.origin);
-  }
-}
-
-function toNormalizedPoint(x: number, y: number) {
-  return {
-    x: Math.min(1, Math.max(0, x / VIEWPORT.width)),
-    y: Math.min(1, Math.max(0, y / VIEWPORT.height))
-  };
-}
-
-function getElementCenter(elementId: string) {
-  const element = TRACKED_ELEMENTS[elementId];
-
-  if (!element) {
-    return { x: 0.5, y: 0.5 };
-  }
-
-  return toNormalizedPoint(element.rect.x + element.rect.width / 2, element.rect.y + element.rect.height / 2);
-}
-
-function buildSeedSession(
-  path: string[],
-  options: {
-    sessionId: string;
-    userLabel: string;
-    userSegment: string;
-    startedAt: number;
-    stepIntervalsMs: number[];
-    frustrationBursts?: Array<{ elementId: string; repeats: number; startOffsetMs: number }>;
-  }
-): TracerSession {
-  const allTrackedIds = Object.keys(TRACKED_ELEMENTS);
-  const events: TracerEvent[] = [];
-
-  events.push({
-    id: createId("route"),
-    type: "route",
-    ts: options.startedAt,
-    route: DEMO_APP_ROUTE
+  return snapshot.docs.map((doc) => {
+    const data = doc.data() as StoredSession;
+    return {
+      id: data.sessionId,
+      projectId: data.projectId,
+      route: data.route,
+      startedAt: data.startedAt,
+      endedAt: data.endedAt,
+      userLabel: data.userLabel,
+      userSegment: data.userSegment,
+      source: data.source,
+      events: data.events ?? [],
+    };
   });
-
-  allTrackedIds.forEach((elementId, index) => {
-    const element = TRACKED_ELEMENTS[elementId];
-    events.push({
-      id: createId("impression"),
-      type: "impression",
-      ts: options.startedAt + 40 + index * 8,
-      route: DEMO_APP_ROUTE,
-      elementId,
-      elementLabel: element.label,
-      rect: element.rect
-    });
-  });
-
-  const pointerStart = { x: 0.08, y: 0.12 };
-  events.push({
-    id: createId("move"),
-    type: "mousemove",
-    ts: options.startedAt + 90,
-    route: DEMO_APP_ROUTE,
-    x: pointerStart.x,
-    y: pointerStart.y
-  });
-
-  let absoluteTime = options.startedAt + 200;
-
-  path.forEach((elementId, index) => {
-    const element = TRACKED_ELEMENTS[elementId];
-    const point = getElementCenter(elementId);
-    const hoverMs = Math.max(600, Math.round(options.stepIntervalsMs[index] * 0.42));
-
-    events.push({
-      id: createId("move"),
-      type: "mousemove",
-      ts: absoluteTime,
-      route: DEMO_APP_ROUTE,
-      elementId,
-      elementLabel: element.label,
-      x: point.x,
-      y: point.y
-    });
-
-    events.push({
-      id: createId("hover"),
-      type: "hover",
-      ts: absoluteTime + 300,
-      route: DEMO_APP_ROUTE,
-      elementId,
-      elementLabel: element.label,
-      rect: element.rect,
-      hoverMs
-    });
-
-    events.push({
-      id: createId("click"),
-      type: "click",
-      ts: absoluteTime + hoverMs,
-      route: DEMO_APP_ROUTE,
-      elementId,
-      elementLabel: element.label,
-      rect: element.rect,
-      x: point.x,
-      y: point.y,
-      repeatIndex: 1
-    });
-
-    absoluteTime += options.stepIntervalsMs[index];
-  });
-
-  (options.frustrationBursts ?? []).forEach((burst) => {
-    const point = getElementCenter(burst.elementId);
-    const element = TRACKED_ELEMENTS[burst.elementId];
-
-    for (let index = 0; index < burst.repeats; index += 1) {
-      events.push({
-        id: createId("move"),
-        type: "mousemove",
-        ts: options.startedAt + burst.startOffsetMs + index * 240,
-        route: DEMO_APP_ROUTE,
-        elementId: burst.elementId,
-        elementLabel: element.label,
-        x: point.x,
-        y: point.y
-      });
-
-      events.push({
-        id: createId("click"),
-        type: "click",
-        ts: options.startedAt + burst.startOffsetMs + 90 + index * 240,
-        route: DEMO_APP_ROUTE,
-        elementId: burst.elementId,
-        elementLabel: element.label,
-        rect: element.rect,
-        x: point.x,
-        y: point.y,
-        repeatIndex: index + 2
-      });
-    }
-  });
-
-  const endedAt = Math.max(...events.map((event) => event.ts)) + 1200;
-
-  return {
-    id: options.sessionId,
-    projectId: "tracer-demo",
-    route: DEMO_APP_ROUTE,
-    startedAt: options.startedAt,
-    endedAt,
-    userLabel: options.userLabel,
-    userSegment: options.userSegment,
-    source: "seed",
-    events
-  };
 }
 
-function buildSeedSessions() {
-  const startedAt = Date.now() - 1000 * 60 * 60 * 3;
-
-  return [
-    buildSeedSession(["home", "product", "cart", "checkout", "purchase"], {
-      sessionId: "seed_fast_1",
-      userLabel: "Aarav",
-      userSegment: "Returning team",
-      startedAt,
-      stepIntervalsMs: [8000, 14000, 17000, 22000, 26000]
-    }),
-    buildSeedSession(["home", "product", "cart", "checkout", "purchase"], {
-      sessionId: "seed_fast_2",
-      userLabel: "Mia",
-      userSegment: "Power user",
-      startedAt: startedAt + 60000,
-      stepIntervalsMs: [9000, 15000, 18000, 21000, 28000]
-    }),
-    buildSeedSession(["home", "pricing", "product", "cart", "checkout", "purchase"], {
-      sessionId: "seed_pricing_1",
-      userLabel: "Noah",
-      userSegment: "Budget-conscious team",
-      startedAt: startedAt + 120000,
-      stepIntervalsMs: [11000, 21000, 16000, 20000, 26000, 34000]
-    }),
-    buildSeedSession(["home", "pricing", "product", "cart"], {
-      sessionId: "seed_pricing_2",
-      userLabel: "Isla",
-      userSegment: "New visitor",
-      startedAt: startedAt + 180000,
-      stepIntervalsMs: [12000, 22000, 19000, 24000]
-    }),
-    buildSeedSession(["home", "product", "cart", "checkout"], {
-      sessionId: "seed_friction_1",
-      userLabel: "Ethan",
-      userSegment: "Checkout blocker",
-      startedAt: startedAt + 240000,
-      stepIntervalsMs: [9000, 15000, 24000, 34000],
-      frustrationBursts: [{ elementId: "checkout", repeats: 3, startOffsetMs: 78000 }]
-    }),
-    buildSeedSession(["home", "product", "cart", "checkout", "purchase"], {
-      sessionId: "seed_friction_2",
-      userLabel: "Sofia",
-      userSegment: "Checkout blocker",
-      startedAt: startedAt + 300000,
-      stepIntervalsMs: [9000, 17000, 24000, 38000, 56000],
-      frustrationBursts: [{ elementId: "checkout", repeats: 2, startOffsetMs: 82000 }]
-    }),
-    buildSeedSession(["home", "product"], {
-      sessionId: "seed_explore_1",
-      userLabel: "Luca",
-      userSegment: "Explorer",
-      startedAt: startedAt + 360000,
-      stepIntervalsMs: [10000, 24000]
-    }),
-    buildSeedSession(["home", "product", "cart", "checkout", "purchase"], {
-      sessionId: "seed_fast_3",
-      userLabel: "Olivia",
-      userSegment: "Returning team",
-      startedAt: startedAt + 420000,
-      stepIntervalsMs: [7000, 12000, 16000, 20000, 24000]
-    }),
-    buildSeedSession(["home", "pricing", "cart", "checkout", "purchase"], {
-      sessionId: "seed_pricing_3",
-      userLabel: "Liam",
-      userSegment: "Plan comparer",
-      startedAt: startedAt + 480000,
-      stepIntervalsMs: [10000, 18000, 24000, 31000, 41000]
-    })
-  ];
-}
-
-export function readTracerStore(): TracerStoreData {
-  const browserWindow = getBrowserWindow();
-
-  if (!browserWindow) {
-    return getDefaultStore();
-  }
-
-  const rawStore = browserWindow.localStorage.getItem(TRACER_STORAGE_KEY);
-
-  if (!rawStore) {
-    return getDefaultStore();
-  }
-
-  try {
-    const parsed = JSON.parse(rawStore) as TracerStoreData;
-
-    if (parsed.version !== STORE_VERSION || !Array.isArray(parsed.sessions)) {
-      return getDefaultStore();
-    }
-
-    return parsed;
-  } catch {
-    return getDefaultStore();
-  }
-}
-
-export function ensureTracerSeedData() {
-  const currentStore = readTracerStore();
-
-  if (currentStore.seededAt) {
-    return currentStore;
-  }
-
-  const nextStore: TracerStoreData = {
-    ...currentStore,
-    seededAt: Date.now(),
-    sessions: [...buildSeedSessions(), ...currentStore.sessions]
-  };
-
-  writeTracerStore(nextStore);
-
-  return nextStore;
-}
-
-export function subscribeToTracerData(listener: () => void) {
-  const browserWindow = getBrowserWindow();
-
-  if (!browserWindow) {
-    return () => undefined;
-  }
-
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key === TRACER_STORAGE_KEY) {
-      listener();
-    }
-  };
-
-  const handleCustomEvent = () => {
-    listener();
-  };
-
-  const handleMessage = (event: MessageEvent) => {
-    if (event.data?.type === TRACER_DATA_EVENT) {
-      listener();
-    }
-  };
-
-  browserWindow.addEventListener("storage", handleStorage);
-  browserWindow.addEventListener(TRACER_DATA_EVENT, handleCustomEvent);
-  browserWindow.addEventListener("message", handleMessage);
-
-  return () => {
-    browserWindow.removeEventListener("storage", handleStorage);
-    browserWindow.removeEventListener(TRACER_DATA_EVENT, handleCustomEvent);
-    browserWindow.removeEventListener("message", handleMessage);
-  };
-}
+// ─── Public helpers ──────────────────────────────────────────────────────────
 
 export function getTrackedElements() {
   return Object.values(TRACKED_ELEMENTS);
 }
 
-export function getOrCreateLiveSessionId(projectId: string) {
-  const browserWindow = getBrowserWindow();
-
-  if (!browserWindow) {
-    return createId("live");
-  }
-
-  const existing = browserWindow.sessionStorage.getItem(TRACER_SESSION_KEY);
-
-  if (existing) {
-    return existing;
-  }
-
-  const sessionId = createId("live");
-  browserWindow.sessionStorage.setItem(TRACER_SESSION_KEY, sessionId);
-
-  return sessionId;
-}
-
-export function appendTracerEvent(
-  sessionId: string,
-  event: TracerEvent,
-  sessionMeta: {
-    projectId: string;
-    route: string;
-    userLabel: string;
-    userSegment: string;
-    source?: "seed" | "live";
-  }
-) {
-  const currentStore = readTracerStore();
-  const existingSessions = [...currentStore.sessions];
-  const sessionIndex = existingSessions.findIndex((session) => session.id === sessionId);
-
-  if (sessionIndex === -1) {
-    existingSessions.push({
-      id: sessionId,
-      projectId: sessionMeta.projectId,
-      route: sessionMeta.route,
-      startedAt: event.ts,
-      endedAt: event.ts,
-      userLabel: sessionMeta.userLabel,
-      userSegment: sessionMeta.userSegment,
-      source: sessionMeta.source ?? "live",
-      events: [event]
-    });
-  } else {
-    const session = existingSessions[sessionIndex];
-    existingSessions[sessionIndex] = {
-      ...session,
-      route: sessionMeta.route,
-      endedAt: Math.max(session.endedAt, event.ts),
-      userLabel: sessionMeta.userLabel,
-      userSegment: sessionMeta.userSegment,
-      events: [...session.events, event]
-    };
-  }
-
-  writeTracerStore({
-    ...currentStore,
-    sessions: existingSessions
-  });
-}
+// ─── Analytics computations (same logic as before, now server-side) ──────────
 
 function getClickPath(session: TracerSession) {
-  const clicks = session.events.filter((event) => event.type === "click" && event.elementId);
+  const clicks = session.events.filter((e) => e.type === "click" && e.elementId);
   const path: string[] = [];
-
-  clicks.forEach((event) => {
-    if (event.elementId && path[path.length - 1] !== event.elementId) {
-      path.push(event.elementId);
+  clicks.forEach((e) => {
+    if (e.elementId && path[path.length - 1] !== e.elementId) {
+      path.push(e.elementId);
     }
   });
-
   return path;
 }
 
 function getFrustrationClicks(session: TracerSession) {
-  return session.events.filter((event) => event.type === "click" && (event.repeatIndex ?? 1) > 1).length;
+  return session.events.filter((e) => e.type === "click" && (e.repeatIndex ?? 1) > 1).length;
 }
 
 function getSessionDuration(session: TracerSession) {
@@ -573,33 +198,33 @@ function getSessionDuration(session: TracerSession) {
 function getSessionFrustrationIndex(session: TracerSession) {
   const frustrationClicks = getFrustrationClicks(session);
   const checkoutHoverMs = session.events
-    .filter((event) => event.type === "hover" && event.elementId === "checkout")
-    .reduce((sum, event) => sum + (event.hoverMs ?? 0), 0);
-
+    .filter((e) => e.type === "hover" && e.elementId === "checkout")
+    .reduce((sum, e) => sum + (e.hoverMs ?? 0), 0);
   return Math.min(100, Math.round(frustrationClicks * 24 + checkoutHoverMs / 400));
 }
 
-export function getHeatmapMetrics(route = DEMO_APP_ROUTE) {
-  const sessions = readTracerStore().sessions.filter((session) => session.route === route);
+export function computeHeatmapMetrics(sessions: TracerSession[], route = DEMO_APP_ROUTE): HeatmapMetric[] {
+  const filteredSessions = sessions.filter((s) => s.route === route);
 
   return getTrackedElements()
     .map((element) => {
-      const impressions = sessions.flatMap((session) =>
-        session.events.filter((event) => event.type === "impression" && event.elementId === element.id)
+      const impressions = filteredSessions.flatMap((s) =>
+        s.events.filter((e) => e.type === "impression" && e.elementId === element.id)
       );
-      const clicks = sessions.flatMap((session) =>
-        session.events.filter((event) => event.type === "click" && event.elementId === element.id)
+      const clicks = filteredSessions.flatMap((s) =>
+        s.events.filter((e) => e.type === "click" && e.elementId === element.id)
       );
-      const hovers = sessions.flatMap((session) =>
-        session.events.filter((event) => event.type === "hover" && event.elementId === element.id)
+      const hovers = filteredSessions.flatMap((s) =>
+        s.events.filter((e) => e.type === "hover" && e.elementId === element.id)
       );
 
-      const repeatClicksAfterFirst = clicks.filter((event) => (event.repeatIndex ?? 1) > 1).length;
+      const repeatClicksAfterFirst = clicks.filter((e) => (e.repeatIndex ?? 1) > 1).length;
       const avgHoverMs =
         hovers.length === 0
           ? 0
-          : Math.round(hovers.reduce((sum, event) => sum + (event.hoverMs ?? 0), 0) / hovers.length);
-      const clickedPct = impressions.length === 0 ? 0 : Math.min(100, Math.round((clicks.length / impressions.length) * 100));
+          : Math.round(hovers.reduce((sum, e) => sum + (e.hoverMs ?? 0), 0) / hovers.length);
+      const clickedPct =
+        impressions.length === 0 ? 0 : Math.min(100, Math.round((clicks.length / impressions.length) * 100));
       const ignoredPct = Math.max(0, 100 - clickedPct);
       const frustrationIndex = Math.min(
         100,
@@ -617,10 +242,10 @@ export function getHeatmapMetrics(route = DEMO_APP_ROUTE) {
         ignoredPct,
         avgHoverMs,
         repeatClicksAfterFirst,
-        frustrationIndex
+        frustrationIndex,
       } satisfies HeatmapMetric;
     })
-    .sort((left, right) => right.frustrationIndex - left.frustrationIndex);
+    .sort((a, b) => b.frustrationIndex - a.frustrationIndex);
 }
 
 function buildClusterLabel(session: TracerSession) {
@@ -631,79 +256,59 @@ function buildClusterLabel(session: TracerSession) {
   if (frustrationClicks >= 2 || (clickPath.includes("checkout") && !clickPath.includes("purchase"))) {
     return "checkout-friction";
   }
-
   if (clickPath.includes("pricing")) {
     return "pricing-detour";
   }
-
   if (clickPath.includes("purchase") && duration <= 120000) {
     return "fast-checkout";
   }
-
   return "exploration";
 }
 
 function getClusterDescriptor(clusterId: string) {
   switch (clusterId) {
     case "fast-checkout":
-      return {
-        label: "Fast Checkout",
-        description: "Focused users who progress from home to purchase with minimal hesitation.",
-        color: "#2DD4FF"
-      };
+      return { label: "Fast Checkout", description: "Focused users who progress from home to purchase with minimal hesitation.", color: "#2DD4FF" };
     case "pricing-detour":
-      return {
-        label: "Pricing Comparison",
-        description: "Users who pause at pricing, compare value, then continue or exit.",
-        color: "#F59E0B"
-      };
+      return { label: "Pricing Comparison", description: "Users who pause at pricing, compare value, then continue or exit.", color: "#F59E0B" };
     case "checkout-friction":
-      return {
-        label: "Checkout Friction",
-        description: "Sessions with repeated checkout attempts or stalled completion.",
-        color: "#FB7185"
-      };
+      return { label: "Checkout Friction", description: "Sessions with repeated checkout attempts or stalled completion.", color: "#FB7185" };
     default:
-      return {
-        label: "Exploration",
-        description: "Users browsing product surfaces without reaching the purchase path.",
-        color: "#94A3B8"
-      };
+      return { label: "Exploration", description: "Users browsing product surfaces without reaching the purchase path.", color: "#94A3B8" };
   }
 }
 
 function buildReplayPoints(session: TracerSession): ReplayPoint[] {
   const pointerEvents = session.events.filter(
-    (event) => (event.type === "mousemove" || event.type === "click") && typeof event.x === "number" && typeof event.y === "number"
+    (e) => (e.type === "mousemove" || e.type === "click") && typeof e.x === "number" && typeof e.y === "number"
   );
   const startTs = pointerEvents[0]?.ts ?? session.startedAt;
 
-  return pointerEvents.map((event) => ({
-    x: event.x ?? 0,
-    y: event.y ?? 0,
-    ts: event.ts - startTs,
-    type: event.type === "click" ? "click" : "move"
+  return pointerEvents.map((e) => ({
+    x: e.x ?? 0,
+    y: e.y ?? 0,
+    ts: e.ts - startTs,
+    type: e.type === "click" ? "click" : "move",
   }));
 }
 
-export function getJourneyClusters() {
-  const sessions = readTracerStore().sessions;
-  const groupedSessions = new Map<string, TracerSession[]>();
+export function computeJourneyClusters(sessions: TracerSession[]): JourneyCluster[] {
+  const grouped = new Map<string, TracerSession[]>();
 
   sessions.forEach((session) => {
     const clusterId = buildClusterLabel(session);
-    const clusterSessions = groupedSessions.get(clusterId) ?? [];
-    clusterSessions.push(session);
-    groupedSessions.set(clusterId, clusterSessions);
+    const group = grouped.get(clusterId) ?? [];
+    group.push(session);
+    grouped.set(clusterId, group);
   });
 
-  return Array.from(groupedSessions.entries())
+  return Array.from(grouped.entries())
     .map(([clusterId, clusterSessions], index) => {
       const descriptor = getClusterDescriptor(clusterId);
       const durations = clusterSessions.map(getSessionDuration);
-      const avgDurationMs = Math.round(durations.reduce((sum, value) => sum + value, 0) / clusterSessions.length);
+      const avgDurationMs = Math.round(durations.reduce((s, v) => s + v, 0) / clusterSessions.length);
       const avgFrustrationIndex = Math.round(
-        clusterSessions.map(getSessionFrustrationIndex).reduce((sum, value) => sum + value, 0) / clusterSessions.length
+        clusterSessions.map(getSessionFrustrationIndex).reduce((s, v) => s + v, 0) / clusterSessions.length
       );
       const representativePath = getClickPath(clusterSessions[0])
         .map((step) => TRACKED_ELEMENTS[step]?.label ?? step)
@@ -719,44 +324,36 @@ export function getJourneyClusters() {
         avgDurationMs,
         avgFrustrationIndex,
         topPath: representativePath || "No click path recorded",
-        streams: clusterSessions.slice(0, 3).map((session, streamIndex) => ({
+        streams: clusterSessions.slice(0, 3).map((session, si) => ({
           sessionId: session.id,
-          color: streamColors[(index + streamIndex) % streamColors.length],
-          points: buildReplayPoints(session)
-        }))
+          color: streamColors[(index + si) % streamColors.length],
+          points: buildReplayPoints(session),
+        })),
       } satisfies JourneyCluster;
     })
-    .sort((left, right) => right.sessionCount - left.sessionCount);
+    .sort((a, b) => b.sessionCount - a.sessionCount);
 }
 
-export function getCustomFunnelMetrics(steps: string[]) {
-  if (steps.length === 0) {
-    return [];
-  }
+export function computeFunnelMetrics(sessions: TracerSession[], steps: string[]): FunnelStepMetric[] {
+  if (steps.length === 0) return [];
 
-  const sessions = readTracerStore().sessions;
   const matchedTimesByStep = steps.map(() => [] as number[]);
   const sessionsReachedByStep = steps.map(() => 0);
 
   sessions.forEach((session) => {
-    const clickEvents = session.events.filter((event) => event.type === "click" && event.elementId);
+    const clickEvents = session.events.filter((e) => e.type === "click" && e.elementId);
     let searchStartIndex = 0;
     let previousTs: number | null = null;
 
-    for (let stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {
-      const matchIndex = clickEvents.findIndex(
-        (event, eventIndex) => eventIndex >= searchStartIndex && event.elementId === steps[stepIndex]
-      );
-
-      if (matchIndex === -1) {
-        break;
-      }
+    for (let i = 0; i < steps.length; i++) {
+      const matchIndex = clickEvents.findIndex((e, ei) => ei >= searchStartIndex && e.elementId === steps[i]);
+      if (matchIndex === -1) break;
 
       const matchedEvent = clickEvents[matchIndex];
-      sessionsReachedByStep[stepIndex] += 1;
+      sessionsReachedByStep[i] += 1;
 
-      if (stepIndex > 0 && previousTs !== null) {
-        matchedTimesByStep[stepIndex].push(matchedEvent.ts - previousTs);
+      if (i > 0 && previousTs !== null) {
+        matchedTimesByStep[i].push(matchedEvent.ts - previousTs);
       }
 
       previousTs = matchedEvent.ts;
@@ -774,7 +371,7 @@ export function getCustomFunnelMetrics(steps: string[]) {
     const avgTimeFromPreviousMs =
       matchedTimesByStep[index].length === 0
         ? null
-        : Math.round(matchedTimesByStep[index].reduce((sum, value) => sum + value, 0) / matchedTimesByStep[index].length);
+        : Math.round(matchedTimesByStep[index].reduce((s, v) => s + v, 0) / matchedTimesByStep[index].length);
 
     return {
       elementId,
@@ -782,18 +379,17 @@ export function getCustomFunnelMetrics(steps: string[]) {
       route: element?.route ?? DEMO_APP_ROUTE,
       sessionsReached: sessionsReachedByStep[index],
       dropOffPct,
-      avgTimeFromPreviousMs
+      avgTimeFromPreviousMs,
     } satisfies FunnelStepMetric;
   });
 }
 
-export function getDashboardOverview() {
-  const store = readTracerStore();
-
+export function computeDashboardOverview(sessions: TracerSession[]) {
+  const clusters = computeJourneyClusters(sessions);
   return {
-    totalSessions: store.sessions.length,
-    liveSessions: store.sessions.filter((session) => session.source === "live").length,
-    clusterCount: getJourneyClusters().length,
-    trackedElementCount: getTrackedElements().length
+    totalSessions: sessions.length,
+    liveSessions: sessions.filter((s) => s.source === "sdk").length,
+    clusterCount: clusters.length,
+    trackedElementCount: getTrackedElements().length,
   };
 }
