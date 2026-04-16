@@ -144,15 +144,18 @@ const TRACKED_ELEMENTS: Record<string, TrackedElementDefinition> = {
 
 export async function fetchAllSessions(projectId?: string): Promise<TracerSession[]> {
   const db = getDb();
-  let query = db.collection(SESSIONS_COLLECTION).orderBy("startedAt", "desc").limit(200);
+  let query: FirebaseFirestore.Query = db.collection(SESSIONS_COLLECTION);
 
+  // Firestore requires a composite index for where() + orderBy().
   if (projectId) {
-    query = query.where("projectId", "==", projectId);
+    query = query.where("projectId", "==", projectId).limit(400);
+  } else {
+    query = query.orderBy("startedAt", "desc").limit(200);
   }
 
   const snapshot = await query.get();
 
-  return snapshot.docs.map((doc) => {
+  const sessions = snapshot.docs.map((doc) => {
     const data = doc.data() as StoredSession;
     return {
       id: data.sessionId,
@@ -164,8 +167,14 @@ export async function fetchAllSessions(projectId?: string): Promise<TracerSessio
       userSegment: data.userSegment,
       source: data.source,
       events: data.events ?? [],
-    };
+    } as TracerSession;
   });
+
+  if (projectId) {
+    sessions.sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  return sessions;
 }
 
 // ─── Public helpers ──────────────────────────────────────────────────────────

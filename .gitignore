@@ -42,3 +42,4 @@ next-env.d.ts
 # tracer-sdk build output
 tracer-sdk/dist/
 tracer-sdk/node_modules/
+delight-cart-ui/

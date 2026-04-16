@@ -53,19 +53,19 @@ export function TracerDashboard({ projectId }: TracerDashboardProps = {}) {
   const summaryCards = [
     {
       title: "Tracked Sessions",
-      value: overview.totalSessions.toString(),
-      hint: `${overview.liveSessions} captured via SDK`,
+      value: overview?.totalSessions?.toString() ?? "0",
+      hint: `${overview?.liveSessions ?? 0} captured via SDK`,
       icon: Activity
     },
     {
       title: "Replay Clusters",
-      value: overview.clusterCount.toString(),
+      value: overview?.clusterCount?.toString() ?? "0",
       hint: "Summary journeys grouped by behavior",
       icon: Route
     },
     {
       title: "Tracked Elements",
-      value: overview.trackedElementCount.toString(),
+      value: overview?.trackedElementCount?.toString() ?? "0",
       hint: "Available across heatmap and funnel panels",
       icon: Flame
     }
