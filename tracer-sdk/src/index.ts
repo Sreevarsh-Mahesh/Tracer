@@ -69,6 +69,8 @@ export interface TracerInitOptions {
   maxBatchSize?: number;
   /** Mouse-move throttle interval in ms — default 150 */
   mouseMoveThrottleMs?: number;
+  /** (Optional) Password to protect the embedded /tracer dashboard route */
+  dashboardPassword?: string;
 }
 
 // ─── Internals ───────────────────────────────────────────────────────────────
@@ -318,6 +320,110 @@ function attachDomListeners(route: string) {
   };
 }
 
+function renderEmbeddedDashboard(options: TracerInitOptions) {
+  // Halt existing document rendering by covering it completely
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.inset = "0";
+  container.style.zIndex = "2147483647"; // Max z-index
+  container.style.backgroundColor = "#080E1A";
+  container.style.fontFamily = "system-ui, -apple-system, sans-serif";
+  container.style.color = "white";
+  container.style.display = "flex";
+  container.style.flexDirection = "column";
+  container.style.alignItems = "center";
+  container.style.justifyContent = "center";
+  
+  const injectIframe = () => {
+    container.innerHTML = "";
+    const iframe = document.createElement("iframe");
+    // Derive backend host from endpoint
+    const baseUrl = options.endpoint.replace("/api/ingest", "");
+    iframe.src = `${baseUrl}/tracer/embed?projectId=${options.projectId}`;
+    iframe.style.width = "100%";
+    iframe.style.height = "100%";
+    iframe.style.border = "none";
+    iframe.title = "Tracer Dashboard";
+    container.appendChild(iframe);
+  };
+
+  if (!options.dashboardPassword) {
+    injectIframe();
+  } else {
+    // Render password prompt
+    const box = document.createElement("div");
+    box.style.background = "rgba(255,255,255,0.03)";
+    box.style.border = "1px solid rgba(226, 232, 240, 0.1)";
+    box.style.padding = "40px";
+    box.style.borderRadius = "12px";
+    box.style.textAlign = "center";
+    box.style.boxShadow = "0 20px 40px rgba(0,0,0,0.4)";
+    
+    const title = document.createElement("h2");
+    title.innerText = "Tracer Developer Dashboard";
+    title.style.margin = "0 0 8px 0";
+    title.style.fontSize = "1.5rem";
+    
+    const subtitle = document.createElement("p");
+    subtitle.innerText = `Accessing telemetry for project: ${options.projectId}`;
+    subtitle.style.margin = "0 0 24px 0";
+    subtitle.style.color = "rgba(255,255,255,0.6)";
+    subtitle.style.fontSize = "0.9rem";
+    
+    const form = document.createElement("form");
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      if (input.value === options.dashboardPassword) {
+        injectIframe();
+      } else {
+        input.value = "";
+        input.placeholder = "Incorrect password";
+        input.style.borderColor = "#FF453A";
+      }
+    };
+    
+    const input = document.createElement("input");
+    input.type = "password";
+    input.placeholder = "Enter dashboard password";
+    input.style.width = "100%";
+    input.style.padding = "12px 16px";
+    input.style.marginBottom = "16px";
+    input.style.borderRadius = "6px";
+    input.style.border = "1px solid rgba(255,255,255,0.2)";
+    input.style.background = "rgba(0,0,0,0.2)";
+    input.style.color = "white";
+    input.style.fontSize = "1rem";
+    input.style.outline = "none";
+    input.onfocus = () => { input.style.borderColor = "#2DD4FF"; };
+    input.onblur = () => { input.style.borderColor = "rgba(255,255,255,0.2)"; };
+    
+    const btn = document.createElement("button");
+    btn.type = "submit";
+    btn.innerText = "Unlock Dashboard";
+    btn.style.width = "100%";
+    btn.style.padding = "12px";
+    btn.style.background = "#2DD4FF";
+    btn.style.color = "black";
+    btn.style.fontWeight = "bold";
+    btn.style.border = "none";
+    btn.style.borderRadius = "6px";
+    btn.style.cursor = "pointer";
+    btn.style.fontSize = "1rem";
+    
+    form.appendChild(input);
+    form.appendChild(btn);
+    box.appendChild(title);
+    box.appendChild(subtitle);
+    box.appendChild(form);
+    container.appendChild(box);
+  }
+
+  document.body.appendChild(container);
+  
+  // Disable scrolling on the host document body
+  document.body.style.overflow = "hidden";
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 const tracer = {
@@ -339,6 +445,12 @@ const tracer = {
    */
   init(options: TracerInitOptions): () => void {
     if (typeof window === "undefined") {
+      return () => undefined;
+    }
+
+    // Auto-hijack `/tracer` route to render embedded dashboard
+    if (window.location.pathname === "/tracer") {
+      renderEmbeddedDashboard(options);
       return () => undefined;
     }
 

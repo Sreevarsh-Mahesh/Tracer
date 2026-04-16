@@ -55,14 +55,18 @@ function MiniDonut({ clickedPct }: { clickedPct: number }) {
   );
 }
 
-export function HeatmapPanel() {
+export function HeatmapPanel({ projectId }: { projectId?: string | null } = {}) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [overlayBoxes, setOverlayBoxes] = useState<OverlayBox[]>([]);
   const [hoveredElementId, setHoveredElementId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
 
-  const { data, isLoading } = useSWR("/api/tracer/heatmap?route=/demo-store", fetcher, {
+  // Default to demo-store route for now — real app would have a route selector
+  const currentRoute = "/demo-store";
+  const endpoint = `/api/tracer/heatmap?route=${currentRoute}${projectId ? `&projectId=${projectId}` : ""}`;
+  
+  const { data, isLoading } = useSWR(endpoint, fetcher, {
     refreshInterval: 15000,
     fallbackData: { metrics: [], elements: [] }
   });

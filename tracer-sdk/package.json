@@ -1,6 +1,6 @@
 {
   "name": "tracer-sdk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Lightweight product analytics SDK — captures clicks, hovers, mouse movements, and custom events. Ships data to your Tracer dashboard.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

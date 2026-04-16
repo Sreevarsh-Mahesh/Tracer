@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { fetchAllSessions } from "@/lib/tracer-store";
 
 export interface ReplaySession {
@@ -20,9 +20,14 @@ export interface ReplaySession {
   }>;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const sessions = await fetchAllSessions();
+    const projectId = request.nextUrl.searchParams.get("projectId");
+    if (!projectId) {
+      return NextResponse.json({ error: "projectId is required" }, { status: 400 });
+    }
+    
+    const sessions = await fetchAllSessions(projectId);
 
     const replaySessions: ReplaySession[] = sessions.map((session) => {
       const pointerEvents = session.events.filter(

@@ -31,11 +31,16 @@ const panelTabs = [
   { label: "Settings" }
 ];
 
-export function TracerDashboard() {
+interface TracerDashboardProps {
+  projectId?: string | null;
+}
+
+export function TracerDashboard({ projectId }: TracerDashboardProps = {}) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState(0);
 
-  const { data: overview, isLoading } = useSWR("/api/tracer/overview", fetcher, {
+  const endpoint = `/api/tracer/overview${projectId ? `?projectId=${projectId}` : ""}`;
+  const { data: overview, isLoading } = useSWR(endpoint, fetcher, {
     refreshInterval: 10000,
     fallbackData: {
       totalSessions: 0,
@@ -158,9 +163,9 @@ export function TracerDashboard() {
           </CardContent>
         </Card>
 
-        {activeTab === 0 ? <HeatmapPanel /> : null}
-        {activeTab === 1 ? <JourneyPanel /> : null}
-        {activeTab === 2 ? <FunnelPanel /> : null}
+        {activeTab === 0 ? <HeatmapPanel projectId={projectId} /> : null}
+        {activeTab === 1 ? <JourneyPanel projectId={projectId} /> : null}
+        {activeTab === 2 ? <FunnelPanel projectId={projectId} /> : null}
         {activeTab === 3 ? <SettingsPanel /> : null}
       </Stack>
     </Box>

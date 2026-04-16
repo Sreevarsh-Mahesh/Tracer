@@ -42,9 +42,10 @@ function paintTrackedSteps(frameDocument: Document | null, steps: string[]) {
   });
 }
 
-const funnelFetcher = async (url: string, steps: string[]) => {
+const funnelFetcher = async ([url, steps, projectId]: [string, string[], string | null | undefined]) => {
   if (steps.length === 0) return { metrics: [], elements: [] };
-  const res = await fetch(url, {
+  const targetUrl = projectId ? `${url}?projectId=${projectId}` : url;
+  const res = await fetch(targetUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ steps }),
@@ -52,7 +53,7 @@ const funnelFetcher = async (url: string, steps: string[]) => {
   return res.json();
 };
 
-export function FunnelPanel() {
+export function FunnelPanel({ projectId }: { projectId?: string | null } = {}) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const listenerCleanupRef = useRef<(() => void) | null>(null);
   const [steps, setSteps] = useState<string[]>([]);
@@ -63,9 +64,9 @@ export function FunnelPanel() {
 
   // Fetch funnel metrics from API when steps change
   const { data: funnelData } = useSWR(
-    steps.length > 0 ? ["/api/tracer/funnels", steps] : null,
-    ([url, s]) => funnelFetcher(url, s),
-    { fallbackData: { metrics: [], elements: [] } }
+    steps.length > 0 ? ["/api/tracer/funnels", steps, projectId] : null,
+    funnelFetcher,
+    { refreshInterval: 10000, fallbackData: { metrics: [], elements: [] } }
   );
 
   const funnelMetrics: FunnelStepMetric[] = funnelData?.metrics ?? [];

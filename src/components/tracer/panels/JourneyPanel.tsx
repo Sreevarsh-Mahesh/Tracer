@@ -74,8 +74,9 @@ function FriendlyCursor({ isClick }: { isClick: boolean }) {
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
-export function JourneyPanel() {
-  const { data, isLoading } = useSWR("/api/tracer/journeys", fetcher, {
+export function JourneyPanel({ projectId }: { projectId?: string | null } = {}) {
+  const endpoint = `/api/tracer/journeys${projectId ? `?projectId=${projectId}` : ""}`;
+  const { data, isLoading } = useSWR(endpoint, fetcher, {
     refreshInterval: 15000,
     fallbackData: { sessions: [] },
   });
