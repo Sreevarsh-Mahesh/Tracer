@@ -62,8 +62,8 @@ export function HeatmapPanel({ projectId, hostUrl }: { projectId?: string | null
   const [hoveredElementId, setHoveredElementId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
 
-  // Default to demo-store route for now — real app would have a route selector
-  const currentRoute = "/demo-store";
+  const [currentRoute, setCurrentRoute] = useState(projectId ? "/" : "/demo-store");
+
   const endpoint = `/api/tracer/heatmap?route=${currentRoute}${projectId ? `&projectId=${projectId}` : ""}`;
   
   const { data, isLoading } = useSWR(endpoint, fetcher, {
