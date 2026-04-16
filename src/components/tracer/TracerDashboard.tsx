@@ -33,9 +33,10 @@ const panelTabs = [
 
 interface TracerDashboardProps {
   projectId?: string | null;
+  hostUrl?: string | null;
 }
 
-export function TracerDashboard({ projectId }: TracerDashboardProps = {}) {
+export function TracerDashboard({ projectId, hostUrl }: TracerDashboardProps = {}) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState(0);
 
@@ -163,9 +164,9 @@ export function TracerDashboard({ projectId }: TracerDashboardProps = {}) {
           </CardContent>
         </Card>
 
-        {activeTab === 0 ? <HeatmapPanel projectId={projectId} /> : null}
-        {activeTab === 1 ? <JourneyPanel projectId={projectId} /> : null}
-        {activeTab === 2 ? <FunnelPanel projectId={projectId} /> : null}
+        {activeTab === 0 ? <HeatmapPanel projectId={projectId} hostUrl={hostUrl} /> : null}
+        {activeTab === 1 ? <JourneyPanel projectId={projectId} hostUrl={hostUrl} /> : null}
+        {activeTab === 2 ? <FunnelPanel projectId={projectId} hostUrl={hostUrl} /> : null}
         {activeTab === 3 ? <SettingsPanel /> : null}
       </Stack>
     </Box>

@@ -16,7 +16,7 @@ import { Eye, Flame, MousePointer2 } from "lucide-react";
 import type { HeatmapMetric } from "@/lib/tracer-store";
 import { InspectorToggleButton } from "./InspectorToggleButton";
 
-const IFRAME_SRC = "/demo-store?embedded=1";
+// Removed hardcoded IFRAME_SRC
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 type OverlayBox = {
@@ -55,7 +55,7 @@ function MiniDonut({ clickedPct }: { clickedPct: number }) {
   );
 }
 
-export function HeatmapPanel({ projectId }: { projectId?: string | null } = {}) {
+export function HeatmapPanel({ projectId, hostUrl }: { projectId?: string | null; hostUrl?: string | null } = {}) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [overlayBoxes, setOverlayBoxes] = useState<OverlayBox[]>([]);
@@ -149,7 +149,7 @@ export function HeatmapPanel({ projectId }: { projectId?: string | null } = {}) 
               <iframe
                 ref={iframeRef}
                 title="Tracer heatmap target"
-                src={IFRAME_SRC}
+                src={hostUrl ? `${hostUrl}${currentRoute}` : `/demo-store?embedded=1`}
                 sandbox="allow-same-origin allow-scripts"
                 scrolling="no"
                 style={{ width: "100%", height: 760, border: 0, display: "block", overflow: "hidden" }}

@@ -339,7 +339,8 @@ function renderEmbeddedDashboard(options: TracerInitOptions) {
     const iframe = document.createElement("iframe");
     // Derive backend host from endpoint
     const baseUrl = options.endpoint.replace("/api/ingest", "");
-    iframe.src = `${baseUrl}/tracer/embed?projectId=${options.projectId}`;
+    const hostUrl = encodeURIComponent(window.location.origin);
+    iframe.src = `${baseUrl}/tracer/embed?projectId=${options.projectId}&hostUrl=${hostUrl}`;
     iframe.style.width = "100%";
     iframe.style.height = "100%";
     iframe.style.border = "none";

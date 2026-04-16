@@ -74,7 +74,7 @@ function FriendlyCursor({ isClick }: { isClick: boolean }) {
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
-export function JourneyPanel({ projectId }: { projectId?: string | null } = {}) {
+export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null; hostUrl?: string | null } = {}) {
   const endpoint = `/api/tracer/journeys${projectId ? `?projectId=${projectId}` : ""}`;
   const { data, isLoading } = useSWR(endpoint, fetcher, {
     refreshInterval: 15000,
@@ -323,7 +323,7 @@ export function JourneyPanel({ projectId }: { projectId?: string | null } = {}) 
                   ref={replayIframeRef}
                   key={selectedSessionId ?? "no-session"} /* force remount on session switch */
                   title="Tracer journey replay surface"
-                  src={IFRAME_SRC}
+                  src={hostUrl && selectedSession ? `${hostUrl}${selectedSession.route}` : IFRAME_SRC}
                   sandbox="allow-same-origin allow-scripts"
                   scrolling="no"
                   style={{

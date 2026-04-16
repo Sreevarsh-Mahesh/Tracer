@@ -53,7 +53,7 @@ const funnelFetcher = async ([url, steps, projectId]: [string, string[], string 
   return res.json();
 };
 
-export function FunnelPanel({ projectId }: { projectId?: string | null } = {}) {
+export function FunnelPanel({ projectId, hostUrl }: { projectId?: string | null; hostUrl?: string | null } = {}) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const listenerCleanupRef = useRef<(() => void) | null>(null);
   const [steps, setSteps] = useState<string[]>([]);
@@ -163,7 +163,7 @@ export function FunnelPanel({ projectId }: { projectId?: string | null } = {}) {
                 <iframe
                   ref={iframeRef}
                   title="Tracer funnel builder surface"
-                  src={IFRAME_SRC}
+                  src={hostUrl ? hostUrl : IFRAME_SRC}
                   sandbox="allow-same-origin allow-scripts"
                   scrolling="no"
                   style={{ width: "100%", height: 680, border: 0, display: "block", overflow: "hidden" }}
