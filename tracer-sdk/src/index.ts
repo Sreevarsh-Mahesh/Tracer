@@ -79,6 +79,7 @@ const SESSION_KEY = "__tracer_session_id__";
 let activeConfig: TracerInitOptions | null = null;
 let activeSessionId: string | null = null;
 let activeCleanup: (() => void) | null = null;
+let isBuildMode = false;
 
 // Event batch queue
 let eventQueue: TracerEvent[] = [];
@@ -233,6 +234,28 @@ function attachDomListeners(route: string) {
   const handleClick = (e: MouseEvent) => {
     const tracked = getTrackedElement(e.target as Element | null);
     if (!tracked) return;
+
+    if (isBuildMode) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.parent?.postMessage({
+        type: "TRACER_BUILDER_CLICK",
+        elementId: tracked.id,
+        elementLabel: tracked.label,
+      }, "*");
+      return;
+    }
+
+    if (isBuildMode) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.parent?.postMessage({
+        type: "TRACER_BUILDER_CLICK",
+        elementId: tracked.id,
+        elementLabel: tracked.label,
+      }, "*");
+      return;
+    }
 
     const prev = clickStreaks.get(tracked.id);
     const isRepeat = prev && e.timeStamp - prev.lastTs < 1200;
@@ -477,11 +500,37 @@ const tracer = {
     // Attach DOM listeners
     const removeDomListeners = attachDomListeners(route);
 
+    // Attach embedded messaging API
+    const handleEmbedMessages = (event: MessageEvent) => {
+      if (event.data?.type === "TRACER_START_BUILDER") {
+        isBuildMode = true;
+        document.body.style.border = "4px solid #2DD4FF";
+      } else if (event.data?.type === "TRACER_STOP_BUILDER") {
+        isBuildMode = false;
+        document.body.style.border = "";
+      } else if (event.data?.type === "TRACER_REQUEST_ELEMENTS") {
+        const els = document.querySelectorAll<HTMLElement>("[data-tracer-id]");
+        const rects = Array.from(els).map(el => {
+          const rect = el.getBoundingClientRect();
+          return {
+            id: el.dataset.tracerId,
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height
+          };
+        });
+        window.parent?.postMessage({ type: "TRACER_ELEMENT_COORDS", rects }, "*");
+      }
+    };
+    window.addEventListener("message", handleEmbedMessages);
+
     // Start periodic flush
     startFlushTimer();
 
     activeCleanup = () => {
       removeDomListeners();
+      window.removeEventListener("message", handleEmbedMessages);
       flush();
       stopFlushTimer();
       activeConfig = null;

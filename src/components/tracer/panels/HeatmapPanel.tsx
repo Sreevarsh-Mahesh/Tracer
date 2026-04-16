@@ -74,31 +74,35 @@ export function HeatmapPanel({ projectId, hostUrl }: { projectId?: string | null
   const metrics: HeatmapMetric[] = data?.metrics ?? [];
 
   useEffect(() => {
-    function syncOverlayPositions() {
-      const frameDocument = iframeRef.current?.contentDocument;
-      if (!frameDocument) return;
-
-      const frameElements = Array.from(frameDocument.querySelectorAll<HTMLElement>("[data-tracer-id]"));
-      const nextBoxes = frameElements
-        .map((element) => {
-          const metric = metrics.find((item) => item.elementId === element.dataset.tracerId);
-          if (!metric) return null;
-          const rect = element.getBoundingClientRect();
-          return { left: rect.left, top: rect.top, width: rect.width, height: rect.height, metric } satisfies OverlayBox;
-        })
-        .filter((value): value is OverlayBox => value !== null);
-
-      setOverlayBoxes(nextBoxes);
+    function requestPositions() {
+      // Ask SDK inside the iframe for coordinates (works cross-origin)
+      iframeRef.current?.contentWindow?.postMessage({ type: "TRACER_REQUEST_ELEMENTS" }, "*");
     }
 
-    const timeout = window.setTimeout(syncOverlayPositions, 150);
-    const interval = window.setInterval(syncOverlayPositions, 1200);
-    window.addEventListener("resize", syncOverlayPositions);
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === "TRACER_ELEMENT_COORDS") {
+        const nextBoxes = event.data.rects
+          .map((rect: any) => {
+            const metric = metrics.find((item) => item.elementId === rect.id);
+            if (!metric) return null;
+            return { left: rect.left, top: rect.top, width: rect.width, height: rect.height, metric } satisfies OverlayBox;
+          })
+          .filter((value: OverlayBox | null): value is OverlayBox => value !== null);
+        setOverlayBoxes(nextBoxes);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+
+    const timeout = window.setTimeout(requestPositions, 150);
+    const interval = window.setInterval(requestPositions, 1200);
+    window.addEventListener("resize", requestPositions);
 
     return () => {
+      window.removeEventListener("message", handleMessage);
       window.clearTimeout(timeout);
       window.clearInterval(interval);
-      window.removeEventListener("resize", syncOverlayPositions);
+      window.removeEventListener("resize", requestPositions);
     };
   }, [metrics]);
 
@@ -154,27 +158,16 @@ export function HeatmapPanel({ projectId, hostUrl }: { projectId?: string | null
                 scrolling="no"
                 style={{ width: "100%", height: 760, border: 0, display: "block", overflow: "hidden" }}
                 onLoad={() => {
-                  const frameDocument = iframeRef.current?.contentDocument;
-                  if (!frameDocument) return;
-                  // Lock iframe scrolling — scroll is not meaningful in a static heatmap view
+                  iframeRef.current?.contentWindow?.postMessage({ type: "TRACER_REQUEST_ELEMENTS" }, "*");
                   try {
-                    if (!frameDocument.getElementById("__tracer_scroll_lock__")) {
+                    const frameDocument = iframeRef.current?.contentDocument;
+                    if (frameDocument && !frameDocument.getElementById("__tracer_scroll_lock__")) {
                       const style = frameDocument.createElement("style");
                       style.id = "__tracer_scroll_lock__";
                       style.textContent = "html,body{overflow:hidden!important;}";
                       frameDocument.head?.appendChild(style);
                     }
                   } catch (_) { /* cross-origin guard */ }
-                  const frameElements = frameDocument.querySelectorAll<HTMLElement>("[data-tracer-id]");
-                  const nextBoxes = Array.from(frameElements)
-                    .map((element) => {
-                      const metric = metrics.find((item) => item.elementId === element.dataset.tracerId);
-                      if (!metric) return null;
-                      const rect = element.getBoundingClientRect();
-                      return { left: rect.left, top: rect.top, width: rect.width, height: rect.height, metric } satisfies OverlayBox;
-                    })
-                    .filter((value): value is OverlayBox => value !== null);
-                  setOverlayBoxes(nextBoxes);
                 }}
               />
 
