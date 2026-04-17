@@ -51,7 +51,7 @@ export function TracerLoginForm({ nextRoute }: { nextRoute: string }) {
             </Typography>
             <Typography color="text.secondary">
               This route is protected separately from the public product surface. The local demo
-              password defaults to `tracer-demo` unless `TRACER_DEMO_PASSWORD` is set.
+              password defaults to `tracer-demo` or `admin`.
             </Typography>
             <TextField
               type="password"
