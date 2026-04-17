@@ -55,7 +55,7 @@ function MiniDonut({ clickedPct }: { clickedPct: number }) {
   );
 }
 
-export function HeatmapPanel({ projectId, hostUrl }: { projectId?: string | null; hostUrl?: string | null } = {}) {
+export function HeatmapPanel({ projectId, hostUrl }: { projectId?: string; hostUrl?: string } = {}) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [overlayBoxes, setOverlayBoxes] = useState<OverlayBox[]>([]);

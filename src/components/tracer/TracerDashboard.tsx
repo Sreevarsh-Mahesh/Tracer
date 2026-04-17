@@ -32,8 +32,8 @@ const panelTabs = [
 ];
 
 interface TracerDashboardProps {
-  projectId?: string | null;
-  hostUrl?: string | null;
+  projectId?: string;
+  hostUrl?: string;
 }
 
 export function TracerDashboard({ projectId, hostUrl }: TracerDashboardProps = {}) {

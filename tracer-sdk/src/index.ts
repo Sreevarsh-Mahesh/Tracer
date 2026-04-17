@@ -525,12 +525,26 @@ const tracer = {
     };
     window.addEventListener("message", handleEmbedMessages);
 
+    const handleScrollSync = () => {
+      // Throttle or broadcast directly. For simplicity, broadcast if cross-origin parents exist.
+      if (window.parent && window.parent !== window) {
+        const els = document.querySelectorAll<HTMLElement>("[data-tracer-id]");
+        const rects = Array.from(els).map(el => {
+          const rect = el.getBoundingClientRect();
+          return { id: el.dataset.tracerId, left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+        });
+        window.parent.postMessage({ type: "TRACER_ELEMENT_COORDS", rects }, "*");
+      }
+    };
+    window.addEventListener("scroll", handleScrollSync, { passive: true });
+
     // Start periodic flush
     startFlushTimer();
 
     activeCleanup = () => {
       removeDomListeners();
       window.removeEventListener("message", handleEmbedMessages);
+      window.removeEventListener("scroll", handleScrollSync);
       flush();
       stopFlushTimer();
       activeConfig = null;

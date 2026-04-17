@@ -77,53 +77,52 @@ export function FunnelPanel({ projectId, hostUrl }: { projectId?: string | null;
   }, [steps]);
 
   useEffect(() => {
-    return () => { listenerCleanupRef.current?.(); };
+    return () => { 
+      if (iframeRef.current?.contentWindow) {
+        iframeRef.current.contentWindow.postMessage({ type: "TRACER_STOP_BUILDER" }, "*");
+      }
+    };
   }, []);
+
+  // Post a message when iframe loads to trigger build mode
+  function handleIframeLoad() {
+    if (iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({ type: "TRACER_START_BUILDER" }, "*");
+    }
+  }
 
   // Inject scroll lock into iframe (doesn't disable pointer-events so clicks still work)
   function lockFrameScroll() {
-    const iframeDoc = iframeRef.current?.contentDocument;
-    if (!iframeDoc) return;
-    try {
-      if (!iframeDoc.getElementById("__tracer_scroll_lock__")) {
-        const style = iframeDoc.createElement("style");
-        style.id = "__tracer_scroll_lock__";
-        style.textContent = "html,body{overflow:hidden!important;}";
-        iframeDoc.head?.appendChild(style);
-      }
-    } catch (_) { /* cross-origin guard */ }
+    // Left empty for cross-origin compliance (SDK or app itself should manage this if needed)
   }
 
   function attachListener() {
-    listenerCleanupRef.current?.();
-    const frameDocument = iframeRef.current?.contentDocument;
-    if (!frameDocument) return;
-
-    const handleClick = (event: MouseEvent) => {
-      const target = event.target as Element | null;
-      const trackedElement = target?.closest<HTMLElement>("[data-tracer-id]");
-      if (!trackedElement) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      const elementId = trackedElement.dataset.tracerId ?? "";
-      setSteps((prev) => {
-        if (prev[prev.length - 1] === elementId) return prev;
-        const next = [...prev, elementId];
-        setBuilderHint(`Added "${trackedElement.dataset.tracerLabel ?? elementId}" as step ${next.length}.`);
-        return next;
-      });
-    };
-
-    frameDocument.addEventListener("click", handleClick, true);
-    listenerCleanupRef.current = () => frameDocument.removeEventListener("click", handleClick, true);
+    // In cross-origin mode, we rely on window messages from the SDK instead of direct DOM listeners
   }
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === "TRACER_BUILDER_CLICK") {
+        const { elementId, elementLabel } = event.data;
+        if (!elementId) return;
+
+        setSteps((prev) => {
+          if (prev[prev.length - 1] === elementId) return prev;
+          const next = [...prev, elementId];
+          setBuilderHint(`Added "${elementLabel ?? elementId}" as step ${next.length}.`);
+          return next;
+        });
+      }
+    };
+    
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
 
   function handleClear() {
     setSteps([]);
     setBuilderHint("Start a new custom journey by clicking tracked buttons inside the iframe in the order you care about.");
-    paintTrackedSteps(iframeRef.current?.contentDocument ?? null, []);
+    // In cross-origin mode, paintTrackedSteps won't work reliably, but we leave the data alone
   }
 
   return (
