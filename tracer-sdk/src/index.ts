@@ -397,7 +397,7 @@ function renderEmbeddedDashboard(options: TracerInitOptions) {
     const form = document.createElement("form");
     form.onsubmit = (e) => {
       e.preventDefault();
-      if (input.value === options.dashboardPassword) {
+      if (input.value.trim() === options.dashboardPassword) {
         injectIframe();
       } else {
         input.value = "";
