@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
 
     const sessions = await fetchAllSessions(projectId);
     const metrics = computeFunnelMetrics(sessions, steps);
-    const elements = getTrackedElements();
+    const elements = getTrackedElements(sessions);
     return NextResponse.json({ metrics, elements });
   } catch (error) {
     console.error("[tracer/funnels]", error);

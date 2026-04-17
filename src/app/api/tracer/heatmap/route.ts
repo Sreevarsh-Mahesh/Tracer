@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     const route = request.nextUrl.searchParams.get("route") ?? "/demo-store";
     const sessions = await fetchAllSessions(projectId);
     const metrics = computeHeatmapMetrics(sessions, route);
-    const elements = getTrackedElements();
+    const elements = getTrackedElements(sessions);
     return NextResponse.json({ metrics, elements });
   } catch (error) {
     console.error("[tracer/heatmap]", error);

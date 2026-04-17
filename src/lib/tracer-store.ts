@@ -179,8 +179,23 @@ export async function fetchAllSessions(projectId?: string): Promise<TracerSessio
 
 // ─── Public helpers ──────────────────────────────────────────────────────────
 
-export function getTrackedElements() {
-  return Object.values(TRACKED_ELEMENTS);
+export function getTrackedElements(sessions?: TracerSession[]) {
+  if (!sessions || sessions.length === 0) return Object.values(TRACKED_ELEMENTS);
+  const map = new Map<string, any>();
+  sessions.forEach((s) => {
+    s.events.forEach((e) => {
+      if (e.elementId && !map.has(e.elementId)) {
+        map.set(e.elementId, {
+          id: e.elementId,
+          label: e.elementLabel || e.elementId,
+          route: s.route,
+          description: `Captured element`,
+          rect: e.rect || { x: 0, y: 0, width: 0, height: 0 },
+        });
+      }
+    });
+  });
+  return Array.from(map.values());
 }
 
 // ─── Analytics computations (same logic as before, now server-side) ──────────
@@ -215,7 +230,7 @@ function getSessionFrustrationIndex(session: TracerSession) {
 export function computeHeatmapMetrics(sessions: TracerSession[], route = DEMO_APP_ROUTE): HeatmapMetric[] {
   const filteredSessions = sessions.filter((s) => s.route === route);
 
-  return getTrackedElements()
+  return getTrackedElements(filteredSessions)
     .map((element) => {
       const impressions = filteredSessions.flatMap((s) =>
         s.events.filter((e) => e.type === "impression" && e.elementId === element.id)
@@ -399,6 +414,6 @@ export function computeDashboardOverview(sessions: TracerSession[]) {
     totalSessions: sessions.length,
     liveSessions: sessions.filter((s) => s.source === "sdk").length,
     clusterCount: clusters.length,
-    trackedElementCount: getTrackedElements().length,
+    trackedElementCount: getTrackedElements(sessions).length,
   };
 }
