@@ -11,6 +11,7 @@
 import { getDatastore, type StoredSession, type StoredEvent } from "./gcp-services";
 
 export const SESSIONS_KIND = "TracerSession";
+export const FUNNELS_KIND = "TracerFunnel";
 
 // ─── Types (re-exported for dashboard components) ────────────────────────────
 
@@ -89,6 +90,14 @@ export type FunnelStepMetric = {
   sessionsReached: number;
   dropOffPct: number | null;
   avgTimeFromPreviousMs: number | null;
+};
+
+export type TracerFunnel = {
+  id: string;
+  projectId: string;
+  name: string;
+  steps: string[];
+  createdAt: number;
 };
 
 // ─── Tracked element registry ────────────────────────────────────────────────
@@ -175,6 +184,48 @@ export async function fetchAllSessions(projectId?: string): Promise<TracerSessio
   }
 
   return sessions;
+}
+
+export async function saveFunnel(projectId: string, name: string, steps: string[]): Promise<TracerFunnel> {
+  const datastore = getDatastore();
+  const key = datastore.key(FUNNELS_KIND);
+  const funnel: TracerFunnel = {
+    id: "",
+    projectId,
+    name,
+    steps,
+    createdAt: Date.now(),
+  };
+
+  await datastore.save({
+    key: key,
+    data: [
+      { name: "projectId", value: funnel.projectId },
+      { name: "name", value: funnel.name },
+      { name: "steps", value: JSON.stringify(funnel.steps), excludeFromIndexes: true },
+      { name: "createdAt", value: funnel.createdAt },
+    ],
+  });
+
+  funnel.id = key.id ?? key.name ?? "";
+  return funnel;
+}
+
+export async function getSavedFunnels(projectId: string): Promise<TracerFunnel[]> {
+  const datastore = getDatastore();
+  const query = datastore.createQuery(FUNNELS_KIND)
+    .filter("projectId", "=", projectId)
+    .order("createdAt", { descending: true });
+    
+  const [entities] = await datastore.runQuery(query);
+
+  return entities.map((doc) => ({
+    id: doc[datastore.KEY]?.id || doc[datastore.KEY]?.name || "",
+    projectId: doc.projectId,
+    name: doc.name,
+    steps: doc.steps ? JSON.parse(doc.steps) : [],
+    createdAt: doc.createdAt,
+  }));
 }
 
 // ─── Public helpers ──────────────────────────────────────────────────────────

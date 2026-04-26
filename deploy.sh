@@ -84,6 +84,17 @@ npm install --ignore-scripts 2>/dev/null || true
 npx tsup src/index.ts --format esm,cjs --dts --clean
 cd ..
 echo "  ✓ tracer-sdk built successfully"
+
+echo "▸ Building delight-cart-ui storefront..."
+cd delight-cart-ui
+npm install --ignore-scripts 2>/dev/null || true
+# Inject env vars directly into the build command
+VITE_TRACER_PROJECT_ID=tracer-demo VITE_TRACER_API_KEY=tk_dev_local VITE_TRACER_ENDPOINT=/api/ingest npm run build
+# Copy output to the Next.js public directory
+rm -rf ../public/assets ../public/index.html
+cp -r dist/* ../public/
+cd ..
+echo "  ✓ delight-cart-ui built successfully"
 echo ""
 
 # ─── Step 2: Provision Infrastructure with Terraform ────────────────────────
@@ -120,7 +131,11 @@ TRACER_DEMO_PASSWORD=tracer-demo,\
 NEXT_PUBLIC_PROJECT_ID=tracer-demo,\
 NEXT_PUBLIC_TRACER_API_KEY=tk_dev_local,\
 NEXT_PUBLIC_TRACER_API_KEY_DISPLAY=tk_dev_local,\
-GOOGLE_CLOUD_PROJECT_ID=$PROJECT_ID"
+GOOGLE_CLOUD_PROJECT_ID=$PROJECT_ID" \
+  --set-build-env-vars \
+"NEXT_PUBLIC_PROJECT_ID=tracer-demo,\
+NEXT_PUBLIC_TRACER_API_KEY=tk_dev_local,\
+NEXT_PUBLIC_TRACER_API_KEY_DISPLAY=tk_dev_local"
 
 echo ""
 

@@ -15,8 +15,8 @@ import {
   Typography
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
-import { ChevronLeft, ChevronRight, GitFork, RefreshCcw, Route } from "lucide-react";
-import type { FunnelStepMetric, TrackedElementDefinition } from "@/lib/tracer-store";
+import { ChevronLeft, ChevronRight, GitFork, RefreshCcw, Route, Save } from "lucide-react";
+import type { FunnelStepMetric, TrackedElementDefinition, TracerFunnel } from "@/lib/tracer-store";
 
 const IFRAME_SRC = "/?embedded=1&builder=1";
 const PANEL_WIDTH = 340;
@@ -61,7 +61,16 @@ export function FunnelPanel({ projectId, hostUrl }: { projectId?: string | null;
   );
   const [panelOpen, setPanelOpen] = useState(true);
 
+  const [funnelName, setFunnelName] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
   const resolvedProjectId = projectId || process.env.NEXT_PUBLIC_PROJECT_ID || null;
+
+  const { data: savedFunnelsData, mutate: mutateSavedFunnels } = useSWR(
+    resolvedProjectId ? `/api/tracer/funnels/saved?projectId=${resolvedProjectId}` : null,
+    (url) => fetch(url).then(r => r.json())
+  );
+  const savedFunnels: TracerFunnel[] = savedFunnelsData?.funnels ?? [];
 
   const { data: funnelData } = useSWR(
     steps.length > 0 ? ["/api/tracer/funnels", steps, resolvedProjectId] : null,
@@ -116,7 +125,26 @@ export function FunnelPanel({ projectId, hostUrl }: { projectId?: string | null;
 
   function handleClear() {
     setSteps([]);
+    setFunnelName("");
     setBuilderHint("Start a new custom journey by clicking tracked buttons inside the iframe in the order you care about.");
+  }
+
+  async function handleSaveFunnel() {
+    if (!funnelName.trim() || steps.length === 0 || !resolvedProjectId) return;
+    setIsSaving(true);
+    try {
+      await fetch("/api/tracer/funnels/saved", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: resolvedProjectId, name: funnelName, steps })
+      });
+      setFunnelName("");
+      mutateSavedFunnels();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -150,6 +178,30 @@ export function FunnelPanel({ projectId, hostUrl }: { projectId?: string | null;
                 </Box>
 
                 <Stack direction="row" spacing={1} alignItems="center">
+                  {savedFunnels.length > 0 && (
+                    <select
+                      onChange={(e) => {
+                        const funnel = savedFunnels.find(f => f.id === e.target.value);
+                        if (funnel) setSteps(funnel.steps);
+                        e.target.value = ""; // reset
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid rgba(226, 232, 240, 0.2)",
+                        background: "rgba(0,0,0,0.2)",
+                        color: "white",
+                        fontSize: "0.875rem",
+                        outline: "none",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <option value="">Load saved funnel...</option>
+                      {savedFunnels.map(f => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                      ))}
+                    </select>
+                  )}
                   <Button
                     variant="outlined"
                     startIcon={<RefreshCcw size={16} />}
@@ -447,6 +499,39 @@ export function FunnelPanel({ projectId, hostUrl }: { projectId?: string | null;
               flexShrink: 0
             }}
           >
+            {steps.length > 0 && (
+              <Stack spacing={1} mb={1.5}>
+                <input
+                  type="text"
+                  placeholder="Name this funnel..."
+                  value={funnelName}
+                  onChange={(e) => setFunnelName(e.target.value)}
+                  style={{
+                    width: "100%", padding: "8px 12px", borderRadius: "6px",
+                    border: "1px solid rgba(45,212,255,0.22)",
+                    background: "rgba(0,0,0,0.3)", color: "white", outline: "none", fontSize: "0.8rem",
+                    boxSizing: "border-box"
+                  }}
+                />
+                <Button
+                  fullWidth
+                  size="small"
+                  variant="contained"
+                  startIcon={<Save size={13} />}
+                  disabled={!funnelName.trim() || isSaving}
+                  onClick={handleSaveFunnel}
+                  sx={{ 
+                    fontSize: "0.75rem", 
+                    bgcolor: "primary.main", 
+                    color: "black", 
+                    "&:hover": { bgcolor: "primary.dark" },
+                    "&.Mui-disabled": { bgcolor: "rgba(45,212,255,0.12)", color: "rgba(255,255,255,0.3)" }
+                  }}
+                >
+                  {isSaving ? "Saving..." : "Save Funnel"}
+                </Button>
+              </Stack>
+            )}
             <Button
               fullWidth
               size="small"

@@ -13,14 +13,37 @@ const storage = new Storage();
  * @param {import('@google-cloud/functions-framework').CloudEvent} cloudEvent
  */
 exports.processTracerEvents = async (cloudEvent) => {
-  // Gen2 CloudEvent format: cloudEvent.data.message.data is base64-encoded
-  const message = cloudEvent.data?.message;
-  if (!message?.data) {
-    console.error('No message data found in CloudEvent');
+  console.log('Received event type:', cloudEvent.type || 'unknown');
+  
+  // Try Gen2 CloudEvent format or direct push format
+  let base64Data = cloudEvent.data?.message?.data || cloudEvent.data?.data || cloudEvent.message?.data;
+  
+  // If it's a raw HTTP request body disguised as a CloudEvent
+  if (!base64Data && cloudEvent.message && cloudEvent.message.data) {
+     base64Data = cloudEvent.message.data;
+  } else if (!base64Data && cloudEvent.data && typeof cloudEvent.data === 'string') {
+     base64Data = cloudEvent.data;
+  } else if (!base64Data && cloudEvent.data && Buffer.isBuffer(cloudEvent.data)) {
+     base64Data = cloudEvent.data.toString('base64');
+  }
+
+  if (!base64Data) {
+    console.error('No message data found. Dump:', JSON.stringify(cloudEvent));
     return;
   }
 
-  const dataStr = Buffer.from(message.data, 'base64').toString('utf-8');
+  // Determine if it's base64 encoded or just a plain string (sometimes local emulators send plain JSON)
+  let dataStr;
+  try {
+    // If it starts with '{' it might be plain text json
+    if (typeof base64Data === 'string' && base64Data.trim().startsWith('{')) {
+      dataStr = base64Data;
+    } else {
+      dataStr = Buffer.from(base64Data, 'base64').toString('utf-8');
+    }
+  } catch (err) {
+    dataStr = Buffer.from(base64Data, 'base64').toString('utf-8');
+  }
   let payload;
 
   try {
