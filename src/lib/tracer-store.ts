@@ -1,14 +1,16 @@
 /**
  * Server-side analytics computation layer.
  *
- * These functions query Firestore for session data and compute
+ * These functions query Google Cloud Datastore for session data and compute
  * the same metrics that the old localStorage-based tracer-store.ts did,
  * but reading from the cloud database instead.
  *
  * Used by the /api/tracer/* dashboard API routes.
  */
 
-import { getDb, SESSIONS_COLLECTION, type StoredSession, type StoredEvent } from "./firebase-admin";
+import { getDatastore, type StoredSession, type StoredEvent } from "./gcp-services";
+
+export const SESSIONS_KIND = "TracerSession";
 
 // ─── Types (re-exported for dashboard components) ────────────────────────────
 
@@ -140,33 +142,31 @@ const TRACKED_ELEMENTS: Record<string, TrackedElementDefinition> = {
   },
 };
 
-// ─── Firestore data access ───────────────────────────────────────────────────
+// ─── Datastore data access ───────────────────────────────────────────────────
 
 export async function fetchAllSessions(projectId?: string): Promise<TracerSession[]> {
-  const db = getDb();
-  let query: FirebaseFirestore.Query = db.collection(SESSIONS_COLLECTION);
+  const datastore = getDatastore();
+  let query = datastore.createQuery(SESSIONS_KIND);
 
-  // Firestore requires a composite index for where() + orderBy().
   if (projectId) {
-    query = query.where("projectId", "==", projectId).limit(400);
+    query = query.filter("projectId", "=", projectId).limit(400);
   } else {
-    query = query.orderBy("startedAt", "desc").limit(200);
+    query = query.order("startedAt", { descending: true }).limit(200);
   }
 
-  const snapshot = await query.get();
+  const [entities] = await datastore.runQuery(query);
 
-  const sessions = snapshot.docs.map((doc) => {
-    const data = doc.data() as StoredSession;
+  const sessions = entities.map((doc) => {
     return {
-      id: data.sessionId,
-      projectId: data.projectId,
-      route: data.route,
-      startedAt: data.startedAt,
-      endedAt: data.endedAt,
-      userLabel: data.userLabel,
-      userSegment: data.userSegment,
-      source: data.source,
-      events: data.events ?? [],
+      id: doc.sessionId,
+      projectId: doc.projectId,
+      route: doc.route,
+      startedAt: doc.startedAt,
+      endedAt: doc.endedAt,
+      userLabel: doc.userLabel,
+      userSegment: doc.userSegment,
+      source: doc.source,
+      events: doc.events ? JSON.parse(doc.events) : [],
     } as TracerSession;
   });
 

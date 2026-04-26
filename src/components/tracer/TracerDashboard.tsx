@@ -40,7 +40,10 @@ export function TracerDashboard({ projectId, hostUrl }: TracerDashboardProps = {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState(0);
 
-  const endpoint = `/api/tracer/overview${projectId ? `?projectId=${projectId}` : ""}`;
+  // Resolve projectId: explicit prop > env var > null
+  const resolvedProjectId = projectId || process.env.NEXT_PUBLIC_PROJECT_ID || null;
+
+  const endpoint = `/api/tracer/overview${resolvedProjectId ? `?projectId=${resolvedProjectId}` : ""}`;
   const { data: overview, isLoading } = useSWR(endpoint, fetcher, {
     refreshInterval: 10000,
     fallbackData: {
@@ -94,11 +97,11 @@ export function TracerDashboard({ projectId, hostUrl }: TracerDashboardProps = {
             </Typography>
             <Typography color="text.secondary" sx={{ maxWidth: 860 }}>
               Structured analytics for developers: inspect element-level heatmaps, clustered replay
-              summaries, and custom conversion funnels — powered by real SDK data from Firestore.
+              summaries, and custom conversion funnels — powered by real SDK data from Google Cloud.
             </Typography>
           </Box>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-            <Button href="/demo-store" target="_blank" rel="noreferrer" variant="outlined" startIcon={<Store size={16} />}>
+            <Button href="/" target="_blank" rel="noreferrer" variant="outlined" startIcon={<Store size={16} />}>
               Open Instrumented App
             </Button>
             <Button variant="contained" onClick={handleLogout}>
@@ -164,9 +167,9 @@ export function TracerDashboard({ projectId, hostUrl }: TracerDashboardProps = {
           </CardContent>
         </Card>
 
-        {activeTab === 0 ? <HeatmapPanel projectId={projectId} hostUrl={hostUrl} /> : null}
-        {activeTab === 1 ? <JourneyPanel projectId={projectId} hostUrl={hostUrl} /> : null}
-        {activeTab === 2 ? <FunnelPanel projectId={projectId} hostUrl={hostUrl} /> : null}
+        {activeTab === 0 ? <HeatmapPanel projectId={resolvedProjectId ?? undefined} hostUrl={hostUrl} /> : null}
+        {activeTab === 1 ? <JourneyPanel projectId={resolvedProjectId} hostUrl={hostUrl} /> : null}
+        {activeTab === 2 ? <FunnelPanel projectId={resolvedProjectId} hostUrl={hostUrl} /> : null}
         {activeTab === 3 ? <SettingsPanel /> : null}
       </Stack>
     </Box>

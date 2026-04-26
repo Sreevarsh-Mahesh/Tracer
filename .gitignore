@@ -43,3 +43,6 @@ next-env.d.ts
 tracer-sdk/dist/
 tracer-sdk/node_modules/
 delight-cart-ui/
+.terraform/
+terraform.tfstate*
+*.tfvars

@@ -61,10 +61,10 @@ export function HeatmapPanel({ projectId, hostUrl }: { projectId?: string; hostU
   const [overlayBoxes, setOverlayBoxes] = useState<OverlayBox[]>([]);
   const [hoveredElementId, setHoveredElementId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(true);
+  const resolvedProjectId = projectId || process.env.NEXT_PUBLIC_PROJECT_ID || null;
+  const [currentRoute, setCurrentRoute] = useState("/");
 
-  const [currentRoute, setCurrentRoute] = useState(projectId ? "/" : "/demo-store");
-
-  const endpoint = `/api/tracer/heatmap?route=${currentRoute}${projectId ? `&projectId=${projectId}` : ""}`;
+  const endpoint = `/api/tracer/heatmap?route=${currentRoute}${resolvedProjectId ? `&projectId=${resolvedProjectId}` : ""}`;
   
   const { data, isLoading } = useSWR(endpoint, fetcher, {
     refreshInterval: 15000,
@@ -153,21 +153,11 @@ export function HeatmapPanel({ projectId, hostUrl }: { projectId?: string; hostU
               <iframe
                 ref={iframeRef}
                 title="Tracer heatmap target"
-                src={hostUrl ? `${hostUrl}${currentRoute}` : `/demo-store?embedded=1`}
+                src={hostUrl ? `${hostUrl}${currentRoute}` : `/?embedded=1`}
                 sandbox="allow-same-origin allow-scripts"
-                scrolling="no"
-                style={{ width: "100%", height: 760, border: 0, display: "block", overflow: "hidden" }}
+                style={{ width: "100%", height: 760, border: 0, display: "block" }}
                 onLoad={() => {
                   iframeRef.current?.contentWindow?.postMessage({ type: "TRACER_REQUEST_ELEMENTS" }, "*");
-                  try {
-                    const frameDocument = iframeRef.current?.contentDocument;
-                    if (frameDocument && !frameDocument.getElementById("__tracer_scroll_lock__")) {
-                      const style = frameDocument.createElement("style");
-                      style.id = "__tracer_scroll_lock__";
-                      style.textContent = "html,body{overflow:hidden!important;}";
-                      frameDocument.head?.appendChild(style);
-                    }
-                  } catch (_) { /* cross-origin guard */ }
                 }}
               />
 
@@ -185,7 +175,7 @@ export function HeatmapPanel({ projectId, hostUrl }: { projectId?: string; hostU
                   <Card
                     sx={{
                       position: "absolute", left: tooltipLeft, top: tooltipTop,
-                      width: 248, pointerEvents: "none",
+                      width: 248, pointerEvents: "none", zIndex: 50,
                       borderColor: "rgba(45,212,255,0.18)",
                       animation: "tracerFadeIn 0.18s ease",
                       "@keyframes tracerFadeIn": {

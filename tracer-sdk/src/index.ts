@@ -246,17 +246,6 @@ function attachDomListeners(route: string) {
       return;
     }
 
-    if (isBuildMode) {
-      e.preventDefault();
-      e.stopPropagation();
-      window.parent?.postMessage({
-        type: "TRACER_BUILDER_CLICK",
-        elementId: tracked.id,
-        elementLabel: tracked.label,
-      }, "*");
-      return;
-    }
-
     const prev = clickStreaks.get(tracked.id);
     const isRepeat = prev && e.timeStamp - prev.lastTs < 1200;
     const repeatIndex = isRepeat ? prev!.repeatIndex + 1 : 1;

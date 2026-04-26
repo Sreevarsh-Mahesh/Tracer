@@ -3,10 +3,7 @@ import { fetchAllSessions, computeFunnelMetrics, getTrackedElements } from "@/li
 
 export async function POST(request: NextRequest) {
   try {
-    const projectId = request.nextUrl.searchParams.get("projectId");
-    if (!projectId) {
-      return NextResponse.json({ error: "projectId is required" }, { status: 400 });
-    }
+    const projectId = request.nextUrl.searchParams.get("projectId") ?? undefined;
 
     const body = await request.json();
     const { steps } = body as { steps: string[] };

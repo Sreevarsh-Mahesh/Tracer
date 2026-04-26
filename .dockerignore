@@ -1,0 +1,34 @@
+# Dependencies (rebuilt in Docker)
+node_modules
+tracer-sdk/node_modules
+tracer-sdk/dist
+
+# Build output
+.next
+out
+build
+
+# Version control
+.git
+.gitignore
+
+# IDE / OS
+.DS_Store
+*.pem
+.vscode
+.idea
+
+# Infrastructure (not needed in image)
+terraform/
+gcp-worker/
+gcp-worker.zip
+delight-cart-ui/
+
+# Environment files (injected via Cloud Run env vars)
+.env
+.env.*
+
+# Misc
+*.md
+LICENSE
+.vercel

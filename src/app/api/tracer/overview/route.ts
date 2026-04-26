@@ -3,11 +3,7 @@ import { fetchAllSessions, computeDashboardOverview } from "@/lib/tracer-store";
 
 export async function GET(request: NextRequest) {
   try {
-    const projectId = request.nextUrl.searchParams.get("projectId");
-    if (!projectId) {
-      return NextResponse.json({ error: "projectId is required" }, { status: 400 });
-    }
-    
+    const projectId = request.nextUrl.searchParams.get("projectId") ?? undefined;
     const sessions = await fetchAllSessions(projectId);
     const overview = computeDashboardOverview(sessions);
     return NextResponse.json(overview);

@@ -141,8 +141,8 @@ tracer.init({
             <Stack spacing={1} sx={{ pl: 1 }}>
               <FlowStep step="1" label="SDK captures" description="Clicks, hovers, mouse moves, impressions on [data-tracer-id] elements" />
               <FlowStep step="2" label="Batched HTTP" description="Events are queued and flushed every 5s via POST /api/ingest" />
-              <FlowStep step="3" label="Firestore" description="Validated events are written to Google Cloud Firestore" />
-              <FlowStep step="4" label="Dashboard" description="API routes query Firestore, compute metrics, serve to this UI" />
+              <FlowStep step="3" label="Pub/Sub → Datastore" description="Events are published to Pub/Sub, processed by a Cloud Function, and stored in Datastore + GCS" />
+              <FlowStep step="4" label="Dashboard" description="API routes query Datastore, compute metrics, and serve to this UI" />
             </Stack>
           </Stack>
         </CardContent>

@@ -1,0 +1,9 @@
+{
+  "name": "tracer-gcp-worker",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@google-cloud/datastore": "^8.0.0",
+    "@google-cloud/storage": "^7.0.0"
+  }
+}

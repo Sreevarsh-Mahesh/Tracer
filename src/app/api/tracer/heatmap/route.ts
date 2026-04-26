@@ -3,11 +3,7 @@ import { fetchAllSessions, computeHeatmapMetrics, getTrackedElements } from "@/l
 
 export async function GET(request: NextRequest) {
   try {
-    const projectId = request.nextUrl.searchParams.get("projectId");
-    if (!projectId) {
-      return NextResponse.json({ error: "projectId is required" }, { status: 400 });
-    }
-    
+    const projectId = request.nextUrl.searchParams.get("projectId") ?? undefined;
     const route = request.nextUrl.searchParams.get("route") ?? "/demo-store";
     const sessions = await fetchAllSessions(projectId);
     const metrics = computeHeatmapMetrics(sessions, route);
