@@ -15,7 +15,7 @@ export const FUNNELS_KIND = "TracerFunnel";
 
 // ─── Types (re-exported for dashboard components) ────────────────────────────
 
-export type TracerEventType = "route" | "impression" | "hover" | "click" | "mousemove" | "custom";
+export type TracerEventType = "route" | "impression" | "hover" | "click" | "mousemove" | "scroll" | "custom";
 
 export type TracerRect = {
   x: number;
@@ -24,7 +24,7 @@ export type TracerRect = {
   height: number;
 };
 
-export type TracerEvent = StoredEvent;
+export type TracerEvent = StoredEvent & { scrollY?: number; scrollX?: number };
 
 export type TracerSession = {
   id: string;

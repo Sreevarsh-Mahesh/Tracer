@@ -49,7 +49,7 @@ export interface StoredSession {
 
 export interface StoredEvent {
   id: string;
-  type: "route" | "impression" | "hover" | "click" | "mousemove" | "custom";
+  type: "route" | "impression" | "hover" | "click" | "mousemove" | "scroll" | "custom";
   ts: number;
   route: string;
   elementId?: string;

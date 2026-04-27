@@ -13,23 +13,25 @@ import {
   LinearProgress,
   Skeleton,
   Stack,
-  Typography
+  Typography,
+  ToggleButtonGroup,
+  ToggleButton
 } from "@mui/material";
 import {
   ChevronLeft,
   ChevronRight,
   Layers,
-  MousePointer2,
+  Clock,
   Pause,
   Play,
   RotateCcw
 } from "lucide-react";
-import type { JourneyCluster, ReplayPoint } from "@/lib/tracer-store";
+import type { JourneyCluster, TracerSession, TracerEvent, ReplayPoint } from "@/lib/tracer-store";
 
 const IFRAME_SRC = "/?embedded=1&replay=1";
 const PANEL_WIDTH = 340;
 const IFRAME_HEIGHT = 680;
-const SCROLL_TRIGGER_Y = 0.6; // start driving scroll when cursor passes below 60% of viewport
+const SCROLL_TRIGGER_Y = 0.6; // For clusters, start driving scroll when cursor passes below 60% of viewport
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -42,6 +44,14 @@ function formatDuration(ms: number) {
   return `${m}m ${(s % 60).toString().padStart(2, "0")}s`;
 }
 
+function timeAgo(ms: number) {
+  const diff = Math.floor((Date.now() - ms) / 1000);
+  if (diff < 60) return "Just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
 function getPointAt(
   playheadMs: number,
   points: ReplayPoint[]
@@ -51,6 +61,34 @@ function getPointAt(
     if (points[i].ts <= playheadMs) return points[i];
   }
   return points[0];
+}
+
+function getSessionStateAt(playheadMs: number, events: TracerEvent[]) {
+  if (!events || events.length === 0) return { x: 0, y: 0, scrollY: 0, isClick: false, hasScroll: false };
+  const startTs = events[0].ts;
+  
+  let lastX = 0;
+  let lastY = 0;
+  let lastScrollY = 0;
+  let isClick = false;
+  let hasScroll = false;
+
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (e.ts - startTs <= playheadMs) {
+      if (e.type === "mousemove" || e.type === "click") {
+        if (e.x !== undefined) lastX = e.x;
+        if (e.y !== undefined) lastY = e.y;
+        isClick = e.type === "click";
+      } else if (e.type === "scroll") {
+        if (e.scrollY !== undefined) lastScrollY = e.scrollY;
+        hasScroll = true;
+      }
+    } else {
+      break;
+    }
+  }
+  return { x: lastX, y: lastY, scrollY: lastScrollY, isClick, hasScroll };
 }
 
 function FriendlyCursor({ isClick, color = "#94A3B8" }: { isClick: boolean, color?: string }) {
@@ -76,36 +114,46 @@ function FriendlyCursor({ isClick, color = "#94A3B8" }: { isClick: boolean, colo
 
 export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null; hostUrl?: string | null } = {}) {
   const resolvedProjectId = projectId || process.env.NEXT_PUBLIC_PROJECT_ID || null;
-  const endpoint = `/api/tracer/journeys${resolvedProjectId ? `?projectId=${resolvedProjectId}` : ""}`;
-  const { data, isLoading } = useSWR(endpoint, fetcher, {
+  const projectQuery = resolvedProjectId ? `?projectId=${resolvedProjectId}` : "";
+  
+  const { data: clusterData, isLoading: isLoadingClusters } = useSWR(`/api/tracer/journeys${projectQuery}`, fetcher, {
     refreshInterval: 15000,
     fallbackData: { clusters: [] },
   });
+  const { data: sessionData, isLoading: isLoadingSessions } = useSWR(`/api/tracer/sessions${projectQuery}`, fetcher, {
+    refreshInterval: 15000,
+    fallbackData: { sessions: [] },
+  });
 
-  const clusters: JourneyCluster[] = data?.clusters ?? [];
+  const clusters: JourneyCluster[] = clusterData?.clusters ?? [];
+  const sessions: TracerSession[] = sessionData?.sessions ?? [];
 
+  const [viewMode, setViewMode] = useState<"clusters" | "sessions">("sessions");
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [playheadMs, setPlayheadMs] = useState(0);
   const [panelOpen, setPanelOpen] = useState(true);
 
-  // Refs for the iframe (avoids stale closure issues in effects)
   const replayIframeRef = useRef<HTMLIFrameElement | null>(null);
   const scrollResetPendingRef = useRef(false);
 
-  // ── Auto-select first cluster when data arrives ──────────────────────────
+  const selectedCluster = viewMode === "clusters" ? clusters.find((c) => c.id === selectedClusterId) ?? null : null;
+  const selectedSession = viewMode === "sessions" ? sessions.find((s) => s.id === selectedSessionId) ?? null : null;
+  
+  const replayDurationMs = viewMode === "clusters" 
+    ? (selectedCluster ? Math.max(1000, ...selectedCluster.streams.map(s => s.points.length ? s.points[s.points.length - 1].ts : 0)) : 1000)
+    : (selectedSession ? Math.max(1000, selectedSession.endedAt - selectedSession.startedAt) : 1000);
+
+  // Auto-select based on mode
   useEffect(() => {
-    if (clusters.length > 0 && !clusters.find((c) => c.id === selectedClusterId)) {
+    if (viewMode === "clusters" && clusters.length > 0 && !clusters.find((c) => c.id === selectedClusterId)) {
       setSelectedClusterId(clusters[0].id);
     }
-  }, [clusters, selectedClusterId]);
-
-  const selectedCluster = clusters.find((c) => c.id === selectedClusterId) ?? null;
-  
-  // Max duration among all streams to define replay length
-  const replayDurationMs = selectedCluster
-    ? Math.max(1000, ...selectedCluster.streams.map(s => s.points.length ? s.points[s.points.length - 1].ts : 0))
-    : 1000;
+    if (viewMode === "sessions" && sessions.length > 0 && !sessions.find((s) => s.id === selectedSessionId)) {
+      setSelectedSessionId(sessions[0].id);
+    }
+  }, [viewMode, clusters, sessions, selectedClusterId, selectedSessionId]);
 
   const lockIframeScroll = useCallback(() => {
     const doc = replayIframeRef.current?.contentDocument;
@@ -135,19 +183,23 @@ export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null
     } catch (_) { /* cross-origin guard */ }
   }, []);
 
-  const selectCluster = useCallback(
+  const selectItem = useCallback(
     (id: string) => {
-      setSelectedClusterId(id);
+      if (viewMode === "clusters") setSelectedClusterId(id);
+      else setSelectedSessionId(id);
       setPlayheadMs(0);
       setPlaying(true);
       scrollResetPendingRef.current = true;
       resetIframeScroll();
     },
-    [resetIframeScroll]
+    [viewMode, resetIframeScroll]
   );
 
   useEffect(() => {
-    if (!playing || !selectedCluster) return;
+    if (!playing) return;
+    if (viewMode === "clusters" && !selectedCluster) return;
+    if (viewMode === "sessions" && !selectedSession) return;
+
     const interval = window.setInterval(() => {
       setPlayheadMs((v) => {
         const next = v + 180;
@@ -159,10 +211,10 @@ export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null
       });
     }, 120);
     return () => window.clearInterval(interval);
-  }, [playing, replayDurationMs, selectedCluster]);
+  }, [playing, replayDurationMs, selectedCluster, selectedSession, viewMode]);
 
+  // Handle iframe scroll updates
   useEffect(() => {
-    if (!selectedCluster || selectedCluster.streams.length === 0) return;
     const doc = replayIframeRef.current?.contentDocument;
     if (!doc) return;
 
@@ -174,23 +226,38 @@ export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null
         return;
       }
 
-      // Drive scroll using the first stream as the "lead"
-      const point = getPointAt(playheadMs, selectedCluster.streams[0].points);
-      if (!point) return;
-
-      const cursorY = point.y; 
-
-      if (cursorY > SCROLL_TRIGGER_Y) {
-        const pageHeight = doc.documentElement.scrollHeight;
-        const target = Math.round(cursorY * pageHeight - IFRAME_HEIGHT * SCROLL_TRIGGER_Y);
-        doc.documentElement.scrollTop = Math.max(0, target);
-      } else if (cursorY < 0.05) {
-        doc.documentElement.scrollTop = 0;
+      if (viewMode === "clusters" && selectedCluster && selectedCluster.streams.length > 0) {
+        // Drive scroll using the first stream as the "lead" cursor y position
+        const point = getPointAt(playheadMs, selectedCluster.streams[0].points);
+        if (!point) return;
+        const cursorY = point.y; 
+        if (cursorY > SCROLL_TRIGGER_Y) {
+          const pageHeight = doc.documentElement.scrollHeight;
+          const target = Math.round(cursorY * pageHeight - IFRAME_HEIGHT * SCROLL_TRIGGER_Y);
+          doc.documentElement.scrollTop = Math.max(0, target);
+        } else if (cursorY < 0.05) {
+          doc.documentElement.scrollTop = 0;
+        }
+      } else if (viewMode === "sessions" && selectedSession) {
+        const state = getSessionStateAt(playheadMs, selectedSession.events);
+        if (state.hasScroll) {
+          // Drive exact scroll position
+          doc.documentElement.scrollTop = state.scrollY;
+        } else {
+          // Fallback to cursor-driven scroll if scroll events missing
+          if (state.y > SCROLL_TRIGGER_Y) {
+            const pageHeight = doc.documentElement.scrollHeight;
+            const target = Math.round(state.y * pageHeight - IFRAME_HEIGHT * SCROLL_TRIGGER_Y);
+            doc.documentElement.scrollTop = Math.max(0, target);
+          } else if (state.y < 0.05) {
+            doc.documentElement.scrollTop = 0;
+          }
+        }
       }
     } catch (_) { /* cross-origin guard */ }
-  }, [playheadMs, selectedCluster]);
+  }, [playheadMs, selectedCluster, selectedSession, viewMode]);
 
-  if (isLoading) {
+  if (isLoadingClusters || isLoadingSessions) {
     return (
       <Card>
         <CardContent sx={{ p: 3 }}>
@@ -204,27 +271,16 @@ export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null
     );
   }
 
-  if (clusters.length === 0) {
-    return (
-      <Card>
-        <CardContent sx={{ p: 3 }}>
-          <Typography variant="h3" sx={{ fontSize: "1.3rem", mb: 1 }}>
-            Journey Replay
-          </Typography>
-          <Typography color="text.secondary">
-            No session data yet. Install the SDK and interact with your app to generate cluster replays.
-          </Typography>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const activeStreams = selectedCluster
+  const activeStreams = viewMode === "clusters" && selectedCluster
     ? selectedCluster.streams.map(stream => ({
         color: stream.color,
         point: getPointAt(playheadMs, stream.points)
       }))
     : [];
+    
+  const sessionState = viewMode === "sessions" && selectedSession
+    ? getSessionStateAt(playheadMs, selectedSession.events)
+    : null;
 
   const replayProgress = replayDurationMs === 0 ? 0 : Math.min(100, (playheadMs / replayDurationMs) * 100);
 
@@ -237,32 +293,39 @@ export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null
               <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", lg: "center" }} spacing={2}>
                 <Box>
                   <Typography variant="h3" sx={{ fontSize: "1.3rem", mb: 0.5 }}>
-                    Clustered Journey Replay
+                    {viewMode === "clusters" ? "Clustered Journey Replay" : "Individual Session Replay"}
                   </Typography>
                   <Typography color="text.secondary">
-                    View summary playback showing aggregate mouse paths and behavior across matching sessions.
+                    {viewMode === "clusters" 
+                      ? "View summary playback showing aggregate mouse paths and behavior across matching sessions."
+                      : "Watch full length replays of individual users exactly as they interacted with your app."}
                   </Typography>
                 </Box>
-                <Button variant="outlined" size="small" startIcon={panelOpen ? <ChevronRight size={15} /> : <Layers size={15} />} onClick={() => setPanelOpen((v) => !v)} sx={{ whiteSpace: "nowrap", borderColor: panelOpen ? "primary.main" : undefined, color: panelOpen ? "primary.main" : undefined }}>
-                  {panelOpen ? "Hide clusters" : "Clusters"}
+                <Button variant="outlined" size="small" startIcon={panelOpen ? <ChevronRight size={15} /> : (viewMode === "clusters" ? <Layers size={15} /> : <Clock size={15} />)} onClick={() => setPanelOpen((v) => !v)} sx={{ whiteSpace: "nowrap", borderColor: panelOpen ? "primary.main" : undefined, color: panelOpen ? "primary.main" : undefined }}>
+                  {panelOpen ? `Hide ${viewMode}` : (viewMode === "clusters" ? "Clusters" : "Sessions")}
                 </Button>
               </Stack>
 
-              {selectedCluster && (
+              {viewMode === "clusters" && selectedCluster && (
                 <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
                   <Chip icon={<Layers size={13} />} label={selectedCluster.label} size="small" sx={{ borderColor: selectedCluster.color, color: selectedCluster.color, borderWidth: 1, borderStyle: "solid" }} />
                   <Chip label={`${selectedCluster.sessionCount} sessions included`} size="small" />
                   <Chip label={`Avg Duration: ${formatDuration(selectedCluster.avgDurationMs)}`} size="small" />
-                  {selectedCluster.avgFrustrationIndex > 30 && (
-                     <Chip label={`😤 High Friction (${selectedCluster.avgFrustrationIndex} idx)`} size="small" color="error" />
-                  )}
+                </Stack>
+              )}
+              
+              {viewMode === "sessions" && selectedSession && (
+                <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Chip icon={<Clock size={13} />} label={`${timeAgo(selectedSession.startedAt)}`} size="small" sx={{ borderColor: "#2DD4FF", color: "#2DD4FF", borderWidth: 1, borderStyle: "solid" }} />
+                  <Chip label={`ID: ${selectedSession.id.slice(0, 8)}`} size="small" />
+                  <Chip label={`Duration: ${formatDuration(selectedSession.endedAt - selectedSession.startedAt)}`} size="small" />
                 </Stack>
               )}
 
               <Box sx={{ position: "relative", overflow: "hidden", borderRadius: "8px", border: "1px solid rgba(226, 232, 240, 0.10)", backgroundColor: "#0B1220", height: IFRAME_HEIGHT }}>
                 <iframe
                   ref={replayIframeRef}
-                  key={selectedClusterId ?? "no-session"}
+                  key={(viewMode === "clusters" ? selectedClusterId : selectedSessionId) ?? "no-session"}
                   title="Tracer journey replay surface"
                   src={hostUrl ? `${hostUrl}/` : IFRAME_SRC}
                   sandbox="allow-same-origin allow-scripts"
@@ -275,26 +338,34 @@ export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null
 
                 <Box sx={{ position: "absolute", inset: 0, zIndex: 2, cursor: "default", touchAction: "none" }} />
 
-                {activeStreams.map((stream, idx) => stream.point && (
+                {/* Cluster multiple cursors */}
+                {viewMode === "clusters" && activeStreams.map((stream, idx) => stream.point && (
                   <Box
                     key={idx}
                     sx={{
-                      position: "absolute",
-                      left: `${stream.point.x * 100}%`,
-                      top: `${stream.point.y * 100}%`,
-                      transform: "translate(-50%, -50%)",
-                      transition: "left 120ms linear, top 120ms linear",
-                      zIndex: 3,
-                      pointerEvents: "none",
+                      position: "absolute", left: `${stream.point.x * 100}%`, top: `${stream.point.y * 100}%`,
+                      transform: "translate(-50%, -50%)", transition: "left 120ms linear, top 120ms linear", zIndex: 3, pointerEvents: "none",
                     }}
                   >
                     <FriendlyCursor isClick={stream.point.type === "click"} color={stream.color} />
                   </Box>
                 ))}
+                
+                {/* Individual session single cursor */}
+                {viewMode === "sessions" && sessionState && (
+                  <Box
+                    sx={{
+                      position: "absolute", left: `${sessionState.x * 100}%`, top: `${sessionState.y * 100}%`,
+                      transform: "translate(-50%, -50%)", transition: "left 120ms linear, top 120ms linear", zIndex: 3, pointerEvents: "none",
+                    }}
+                  >
+                    <FriendlyCursor isClick={sessionState.isClick} color="#2DD4FF" />
+                  </Box>
+                )}
 
-                {!selectedCluster && (
+                {((viewMode === "clusters" && !selectedCluster) || (viewMode === "sessions" && !selectedSession)) && (
                   <Box sx={{ position: "absolute", inset: 0, zIndex: 4, display: "flex", alignItems: "center", justifyContent: "center", bgcolor: "rgba(8,14,26,0.7)", backdropFilter: "blur(4px)" }}>
-                    <Typography color="text.secondary">Select a behavior cluster to begin playback</Typography>
+                    <Typography color="text.secondary">Select a {viewMode === "clusters" ? "cluster" : "session"} to begin playback</Typography>
                   </Box>
                 )}
               </Box>
@@ -310,10 +381,10 @@ export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null
                       <LinearProgress variant="determinate" value={replayProgress} />
                     </Box>
                     <Stack direction="row" spacing={1}>
-                      <Button variant="contained" startIcon={playing ? <Pause size={16} /> : <Play size={16} />} onClick={() => setPlaying((v) => !v)} disabled={!selectedCluster}>
+                      <Button variant="contained" startIcon={playing ? <Pause size={16} /> : <Play size={16} />} onClick={() => setPlaying((v) => !v)} disabled={(viewMode === "clusters" && !selectedCluster) || (viewMode === "sessions" && !selectedSession)}>
                         {playing ? "Pause" : "Play"}
                       </Button>
-                      <Button variant="outlined" startIcon={<RotateCcw size={16} />} onClick={() => { setPlayheadMs(0); scrollResetPendingRef.current = true; resetIframeScroll(); setPlaying(true); }} disabled={!selectedCluster}>
+                      <Button variant="outlined" startIcon={<RotateCcw size={16} />} onClick={() => { setPlayheadMs(0); scrollResetPendingRef.current = true; resetIframeScroll(); setPlaying(true); }} disabled={(viewMode === "clusters" && !selectedCluster) || (viewMode === "sessions" && !selectedSession)}>
                         Restart
                       </Button>
                     </Stack>
@@ -325,34 +396,44 @@ export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null
         </Card>
       </Box>
 
-      {/* Right collapsible Clusters panel */}
+      {/* Right collapsible panel */}
       <Box sx={{ position: "absolute", top: 0, right: 0, width: PANEL_WIDTH, height: "100%", transform: panelOpen ? "translateX(0)" : `translateX(${PANEL_WIDTH + 20}px)`, transition: "transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)", display: "flex", flexDirection: "column", zIndex: 10, pointerEvents: panelOpen ? "auto" : "none" }}>
         <Card sx={{ height: "100%", display: "flex", flexDirection: "column", boxShadow: "-8px 0 32px rgba(0,0,0,0.35)", border: "1px solid rgba(45, 212, 255, 0.12)", backdropFilter: "blur(12px)", background: "linear-gradient(180deg, rgba(11,18,32,0.97) 0%, rgba(8,14,26,0.98) 100%)" }}>
-          <Box sx={{ px: 2.5, py: 2, borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <Box sx={{ width: 32, height: 32, borderRadius: 1, bgcolor: "rgba(45, 212, 255, 0.12)", display: "flex", alignItems: "center", justifyContent: "center", color: "primary.main" }}>
-                <Layers size={16} />
-              </Box>
-              <Box>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.2 }}>Behavior Clusters</Typography>
-                <Typography variant="caption" color="text.secondary">{clusters.length} groups found</Typography>
-              </Box>
+          
+          <Box sx={{ px: 2, pt: 2, pb: 1, borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1.5}>
+               <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.2 }}>Playback List</Typography>
+               <IconButton size="small" onClick={() => setPanelOpen(false)} sx={{ color: "text.secondary", "&:hover": { color: "text.primary", bgcolor: "rgba(255,255,255,0.06)" } }}>
+                 <ChevronLeft size={18} />
+               </IconButton>
             </Stack>
-            <IconButton size="small" onClick={() => setPanelOpen(false)} sx={{ color: "text.secondary", "&:hover": { color: "text.primary", bgcolor: "rgba(255,255,255,0.06)" } }}>
-              <ChevronLeft size={18} />
-            </IconButton>
+            <ToggleButtonGroup
+              color="primary"
+              value={viewMode}
+              exclusive
+              onChange={(_, next) => { if (next) setViewMode(next); }}
+              aria-label="View Mode"
+              fullWidth
+              size="small"
+              sx={{ bgcolor: "rgba(0,0,0,0.2)" }}
+            >
+              <ToggleButton value="sessions" sx={{ py: 0.5, fontSize: "0.75rem", textTransform: "none" }}><Clock size={14} style={{ marginRight: 6 }}/> By Time</ToggleButton>
+              <ToggleButton value="clusters" sx={{ py: 0.5, fontSize: "0.75rem", textTransform: "none" }}><Layers size={14} style={{ marginRight: 6 }}/> By Cluster</ToggleButton>
+            </ToggleButtonGroup>
           </Box>
-          <Box sx={{ px: 2.5, py: 1.5, borderBottom: "1px solid rgba(255,255,255,0.04)", flexShrink: 0 }}>
-            <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>Select a user cluster to watch its summary replay.</Typography>
-          </Box>
+          
           <Box sx={{ flex: 1, overflowY: "auto", px: 2, py: 1.5, "&::-webkit-scrollbar": { width: 4 }, "&::-webkit-scrollbar-thumb": { borderRadius: 2, bgcolor: "rgba(255,255,255,0.1)" } }}>
             <Stack spacing={1}>
-              {clusters.map((cluster) => {
+              {viewMode === "clusters" && clusters.length === 0 && <Typography variant="body2" color="text.secondary">No clusters found.</Typography>}
+              {viewMode === "sessions" && sessions.length === 0 && <Typography variant="body2" color="text.secondary">No sessions found.</Typography>}
+              
+              {/* CLUSTERS VIEW */}
+              {viewMode === "clusters" && clusters.map((cluster) => {
                 const isSelected = cluster.id === selectedClusterId;
                 return (
                   <Card
                     key={cluster.id}
-                    onClick={() => selectCluster(cluster.id)}
+                    onClick={() => selectItem(cluster.id)}
                     sx={{
                       cursor: "pointer", position: "relative", border: "1px solid",
                       borderColor: isSelected ? cluster.color : "rgba(255,255,255,0.06)",
@@ -370,29 +451,49 @@ export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null
                               {cluster.label}
                             </Typography>
                           </Box>
-                          <Chip
-                            label={`${cluster.sessionCount}`}
-                            size="small"
-                            sx={{
-                              height: 20,
-                              fontSize: "0.7rem",
-                              bgcolor: isSelected ? `${cluster.color}22` : undefined,
-                              color: isSelected ? cluster.color : undefined,
-                              borderColor: isSelected ? cluster.color : undefined,
-                              flexShrink: 0
-                            }}
-                            variant={isSelected ? "outlined" : "filled"}
-                          />
+                          <Chip label={`${cluster.sessionCount}`} size="small" sx={{ height: 20, fontSize: "0.7rem", bgcolor: isSelected ? `${cluster.color}22` : undefined, color: isSelected ? cluster.color : undefined, borderColor: isSelected ? cluster.color : undefined, flexShrink: 0 }} variant={isSelected ? "outlined" : "filled"} />
                         </Stack>
                         <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>{cluster.description}</Typography>
                         <Divider sx={{ borderColor: "rgba(255,255,255,0.05)" }} />
                         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                           <Chip label={`⏱ ${formatDuration(cluster.avgDurationMs)}`} size="small" sx={{ height: 18, fontSize: "0.68rem" }} />
-                          <Chip label={`😤 ${cluster.avgFrustrationIndex}`} size="small" sx={{ height: 18, fontSize: "0.68rem" }} />
                         </Stack>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+              
+              {/* SESSIONS VIEW */}
+              {viewMode === "sessions" && sessions.map((session) => {
+                const isSelected = session.id === selectedSessionId;
+                const duration = session.endedAt - session.startedAt;
+                return (
+                  <Card
+                    key={session.id}
+                    onClick={() => selectItem(session.id)}
+                    sx={{
+                      cursor: "pointer", position: "relative", border: "1px solid",
+                      borderColor: isSelected ? "#2DD4FF" : "rgba(255,255,255,0.06)",
+                      backgroundColor: isSelected ? `rgba(45,212,255,0.05)` : "rgba(255,255,255,0.02)",
+                      transition: "all 0.18s",
+                      "&:hover": { borderColor: "#2DD4FF", transform: "translateY(-1px)" }
+                    }}
+                  >
+                    {isSelected && <Box sx={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, borderRadius: "4px 0 0 4px", bgcolor: "#2DD4FF" }} />}
+                    <CardContent sx={{ p: 1.5, pl: isSelected ? 2 : 1.5 }}>
+                      <Stack spacing={0.5}>
+                        <Stack direction="row" justifyContent="space-between" alignItems="center">
+                          <Typography variant="body2" sx={{ fontWeight: 700, fontSize: "0.85rem", color: isSelected ? "#2DD4FF" : "white" }}>
+                            {timeAgo(session.startedAt)}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">{formatDuration(duration)}</Typography>
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontFamily: "monospace" }}>
+                          ID: {session.id.slice(0, 8)}
+                        </Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                          <Box component="span" sx={{ color: "text.disabled" }}>Path: </Box>
-                          {cluster.topPath}
+                          Events: {session.events.length}
                         </Typography>
                       </Stack>
                     </CardContent>
@@ -406,8 +507,8 @@ export function JourneyPanel({ projectId, hostUrl }: { projectId?: string | null
 
       {!panelOpen && (
         <Box onClick={() => setPanelOpen(true)} sx={{ position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 0.5, cursor: "pointer", bgcolor: "primary.main", color: "#000", borderRadius: "8px 0 0 8px", px: 0.75, py: 1.5, zIndex: 20 }}>
-          <Layers size={14} />
-          <Typography variant="caption" sx={{ fontWeight: 700, fontSize: "0.6rem", writingMode: "vertical-rl", textOrientation: "mixed", letterSpacing: "0.05em" }}>CLUSTERS</Typography>
+          {viewMode === "clusters" ? <Layers size={14} /> : <Clock size={14} />}
+          <Typography variant="caption" sx={{ fontWeight: 700, fontSize: "0.6rem", writingMode: "vertical-rl", textOrientation: "mixed", letterSpacing: "0.05em" }}>{viewMode === "clusters" ? "CLUSTERS" : "SESSIONS"}</Typography>
           <ChevronLeft size={14} />
         </Box>
       )}

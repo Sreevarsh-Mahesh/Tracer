@@ -1,0 +1,6 @@
+indexes:
+- kind: TracerFunnel
+  properties:
+  - name: projectId
+  - name: createdAt
+    direction: desc

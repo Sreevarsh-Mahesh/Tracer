@@ -25,6 +25,7 @@ export type TracerEventType =
   | "hover"
   | "click"
   | "mousemove"
+  | "scroll"
   | "custom";
 
 export interface TracerRect {
@@ -46,6 +47,8 @@ export interface TracerEvent {
   y?: number;
   hoverMs?: number;
   repeatIndex?: number;
+  scrollY?: number;
+  scrollX?: number;
   name?: string;
   payload?: Record<string, string | number | boolean>;
 }
@@ -276,6 +279,17 @@ function attachDomListeners(route: string) {
     });
   }, moveThrottle);
 
+  const handleScroll = throttle(() => {
+    enqueue({
+      id: uid("scr"),
+      type: "scroll",
+      ts: Date.now(),
+      route,
+      scrollY: window.scrollY,
+      scrollX: window.scrollX,
+    });
+  }, 250); // Slightly larger throttle for scroll to avoid excessive events
+
   const handleMouseOver = (e: MouseEvent) => {
     const tracked = getTrackedElement(e.target as Element | null);
     if (!tracked) return;
@@ -317,6 +331,7 @@ function attachDomListeners(route: string) {
 
   document.addEventListener("click", handleClick, true);
   document.addEventListener("mousemove", handleMouseMove);
+  document.addEventListener("scroll", handleScroll, { passive: true, capture: true });
   document.addEventListener("mouseover", handleMouseOver, true);
   document.addEventListener("mouseout", handleMouseOut, true);
   document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -325,6 +340,7 @@ function attachDomListeners(route: string) {
   return () => {
     document.removeEventListener("click", handleClick, true);
     document.removeEventListener("mousemove", handleMouseMove);
+    document.removeEventListener("scroll", handleScroll, { capture: true });
     document.removeEventListener("mouseover", handleMouseOver, true);
     document.removeEventListener("mouseout", handleMouseOut, true);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
